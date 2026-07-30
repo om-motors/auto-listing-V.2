@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Tuple
 
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageOps
 
 from . import config, images
 
@@ -66,8 +66,27 @@ def _ocr_datei(path: Path) -> List[Tuple[str, float]]:
     return treffer
 
 
-def _foto_alle_drehungen(foto: Path, arbeitsordner: Path) -> List[Tuple[str, float]]:
-    """Ein Foto in allen vier Drehungen lesen."""
+def _verstaerken(bild: Image.Image) -> Image.Image:
+    """Kontrast und Schärfe anheben.
+
+    Eingestanzte Zeichen auf blankem Aluminium haben kaum Kontrast — es sind
+    Schattenkanten, keine Farbunterschiede. An einem Audi-Träger las die
+    Erkennung im Original nur "807 832. A", nach dieser Aufbereitung dagegen
+    "SK0 807 832 4", also die vollständige Nummer inklusive Typnummer.
+    """
+    grau = ImageOps.grayscale(bild)
+    kontrastreich = ImageEnhance.Contrast(grau).enhance(2.0)
+    return ImageEnhance.Sharpness(kontrastreich).enhance(2.5)
+
+
+def _foto_alle_drehungen(foto: Path, arbeitsordner: Path,
+                         gruendlich: bool = False) -> List[Tuple[str, float]]:
+    """Ein Foto in allen vier Drehungen lesen.
+
+    Mit `gruendlich=True` wird zusätzlich eine kontrastverstärkte Fassung
+    gelesen. Das verdoppelt die Laufzeit und wird deshalb nur nachgeschoben,
+    wenn der schnelle Durchgang keine Teilenummer hergab.
+    """
     gefunden: List[Tuple[str, float]] = []
     try:
         original = images.open_normalized(foto)
@@ -78,23 +97,30 @@ def _foto_alle_drehungen(foto: Path, arbeitsordner: Path) -> List[Tuple[str, flo
     if max(original.size) > config.OCR_MAX_EDGE:
         original.thumbnail((config.OCR_MAX_EDGE, config.OCR_MAX_EDGE), Image.LANCZOS)
 
-    for grad in DREHUNGEN:
-        bild = original.rotate(grad, expand=True) if grad else original
-        ziel = arbeitsordner / ("%s_%d.jpg" % (foto.stem, grad))
-        try:
-            bild.save(ziel, "JPEG", quality=92)
-            gefunden.extend(_ocr_datei(ziel))
-        except Exception as exc:
-            log.debug("OCR: Drehung %d bei %s fehlgeschlagen: %s", grad, foto.name, exc)
-        finally:
-            ziel.unlink(missing_ok=True)
+    aufbereitungen = [("", lambda b: b)]
+    if gruendlich:
+        aufbereitungen.append(("_v", _verstaerken))
+
+    for kuerzel, aufbereiten in aufbereitungen:
+        for grad in DREHUNGEN:
+            bild = original.rotate(grad, expand=True) if grad else original
+            ziel = arbeitsordner / ("%s%s_%d.jpg" % (foto.stem, kuerzel, grad))
+            try:
+                aufbereiten(bild).convert("RGB").save(ziel, "JPEG", quality=92)
+                gefunden.extend(_ocr_datei(ziel))
+            except Exception as exc:
+                log.debug("OCR: Drehung %d bei %s fehlgeschlagen: %s",
+                          grad, foto.name, exc)
+            finally:
+                ziel.unlink(missing_ok=True)
     return gefunden
 
 
-def lies_fotos(fotos: List[Path]) -> List[Tuple[str, float]]:
+def lies_fotos(fotos: List[Path], gruendlich: bool = False) -> List[Tuple[str, float]]:
     """Alle Fotos lesen und sämtliche Textfunde zurückgeben.
 
     Rückgabe: Liste aus (Text, Zuverlässigkeit 0..1), Duplikate entfernt.
+    `gruendlich=True` liest zusätzlich eine kontrastverstärkte Fassung.
     """
     if not verfuegbar():
         raise RuntimeError(
@@ -107,7 +133,7 @@ def lies_fotos(fotos: List[Path]) -> List[Tuple[str, float]]:
         arbeiter = min(4, max(1, len(fotos)))
         with ThreadPoolExecutor(max_workers=arbeiter) as pool:
             ergebnisse = list(pool.map(
-                lambda f: _foto_alle_drehungen(f, ordner), fotos))
+                lambda f: _foto_alle_drehungen(f, ordner, gruendlich), fotos))
 
     # Duplikate zusammenführen, jeweils die beste Zuverlässigkeit behalten
     beste: dict = {}

@@ -68,7 +68,10 @@ def _analyze(produkt: Produkt) -> Produkt:
     tmp = config.ARBEIT / produkt.name
     tmp.mkdir(parents=True, exist_ok=True)
     try:
-        produkt.vision = vision.analyze_photos(produkt.photos, tmp)
+        # Der Ordnername darf die Teilenummer vorgeben — praktisch, wenn die
+        # Fotos sie nicht hergeben. Automatisch vergebene Upload-Namen
+        # ("upload_20260730_135140") erkennt aus_vorgabe() als Nicht-Nummer.
+        produkt.vision = vision.analyze_photos(produkt.photos, tmp, produkt.name)
         nr = produkt.vision["teilenummer_kompakt"]
         produkt.work_dir = config.ERLEDIGT / nr
         produkt.work_dir.mkdir(parents=True, exist_ok=True)
@@ -210,20 +213,29 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Path
     # eBay: die echte Nummer bringt Treffer, ein Lesefehler nicht. Das kostet
     # nichts und fängt genau die Fehler ab, die Muster allein nicht lösen.
     kandidaten = vis.get("_kandidaten") or []
-    if len(kandidaten) > 1:
+    if kandidaten:
         res = research.pruefe_kandidaten(page, kandidaten)
         gewinner = res.get("kandidat")
+        if not res.get("geprueft"):
+            # Keine der gelesenen Nummern brachte auf eBay passende Treffer.
+            # Jetzt trotzdem einen Entwurf zu bauen hieße, ein Inserat mit
+            # falscher Teilenummer anzulegen — lieber ehrlich abbrechen und
+            # den Nutzer die richtige Nummer nennen lassen.
+            liste = ", ".join("%s (%.1f)" % (k.nummer, k.punkte)
+                              for k in kandidaten[:6])
+            raise vision.KeineTeilenummer(
+                "Keine der gelesenen Teilenummern ließ sich auf eBay "
+                "bestätigen. Gelesen wurde: %s. Bitte ein schärferes Foto der "
+                "Nummer ergänzen — oder den Ordner nach der richtigen Nummer "
+                "benennen, dann wird sie direkt verwendet." % liste)
         if gewinner and gewinner.nummer != nr:
-            log.info("[%s] eBay korrigiert Teilenummer: %s -> %s",
+            log.info("[%s] eBay bestätigt Teilenummer: %s -> %s",
                      produkt.name, nr, gewinner.nummer)
             vis["teilenummer"] = gewinner.formatiert
             vis["teilenummer_kompakt"] = gewinner.nummer
             vis["hersteller"] = gewinner.hersteller or vis.get("hersteller")
             nr = gewinner.nummer
             produkt.work_dir = _umbenennen(produkt.work_dir, nr)
-        if not res.get("geprueft"):
-            vis.setdefault("unsicherheiten", []).append(
-                "Teilenummer konnte auf eBay nicht bestätigt werden.")
     else:
         res = research.search_comparables(page, vis["teilenummer"], nr)
 
@@ -234,9 +246,14 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Path
     description = compose.build_description(vis, listing)
     log.info("[%s] %s | %s €", produkt.name, listing["titel"], listing.get("preis"))
 
+    # Werte für die Checkliste im Bericht durchreichen
+    listing["_marke"] = vis.get("hersteller")
+    listing["_nummer"] = vis.get("teilenummer_kompakt")
+
     upload_photos = images.prepare_for_upload(produkt.photos, produkt.work_dir)
     result = draft.create_draft_on_page(
         page, listing, vis, description, upload_photos, produkt.work_dir, dry_run)
+    result["beschreibung"] = description
     if dry_run:
         log.info("[%s] Trockenlauf — Fotos bleiben im Eingang", produkt.name)
         return notify.write_report(vis, listing, res, result, produkt.photos)

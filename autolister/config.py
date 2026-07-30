@@ -58,6 +58,14 @@ MODUS = os.environ.get("AUTOLISTER_MODUS", "lokal").strip().lower()
 # 4032 px kam die vollständige Nummer, bei 3000 px nur noch bruchstückhaft.
 OCR_MAX_EDGE = int(os.environ.get("AUTOLISTER_OCR_MAX_EDGE", "4200"))
 
+# Wie viele Lesarten der Teilenummer auf eBay gegengeprüft werden. Jede
+# Prüfung ist ein Seitenaufruf (~2 s), deshalb begrenzt.
+KANDIDATEN_PRUEFEN = int(os.environ.get("AUTOLISTER_KANDIDATEN_PRUEFEN", "6"))
+
+# Obergrenze für eBay-Suchen je Produkt, damit ein aussichtsloser Fall nicht
+# minutenlang läuft.
+SUCHEN_MAXIMAL = int(os.environ.get("AUTOLISTER_SUCHEN_MAXIMAL", "8"))
+
 # Browser sichtbar laufen lassen (empfohlen: eBay blockt Headless eher)
 HEADLESS = os.environ.get("AUTOLISTER_HEADLESS", "0") == "1"
 
