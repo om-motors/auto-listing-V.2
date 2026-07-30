@@ -1,5 +1,15 @@
 .DS_Store
 Eingang/
 Erledigt/
+Berichte/
+Fehler/
+logs/
+.arbeit/
 graphify-out/
 .claude/settings.local.json
+
+# Umgebung und Geheimnisse
+.venv/
+.env
+__pycache__/
+*.pyc
