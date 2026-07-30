@@ -34,7 +34,49 @@ fi
 mkdir -p "$PROJEKT/logs" "$PROJEKT/Eingang" "$PROJEKT/Erledigt" \
          "$PROJEKT/Berichte" "$PROJEKT/Fehler"
 
-# --- 3. Autostart (launchd) --------------------------------------------------
+# --- 3. Datenschutzsperre von macOS prüfen -----------------------------------
+# macOS schützt Schreibtisch, Dokumente und Downloads. Hintergrunddienste
+# bekommen dort ohne "Festplattenvollzugriff" ein "Operation not permitted" —
+# und zwar wortlos, ohne Nachfrage. Liegt das Projekt in einem solchen Ordner,
+# muss das vor dem Autostart geklärt werden.
+GESCHUETZT=0
+case "$PROJEKT" in
+  "$HOME"/Desktop/*|"$HOME"/Documents/*|"$HOME"/Downloads/*|\
+  "$HOME"/Schreibtisch/*|"$HOME"/Dokumente/*) GESCHUETZT=1 ;;
+esac
+
+if [ "$GESCHUETZT" = "1" ]; then
+  cat <<HINWEIS
+
+--------------------------------------------------------------------------
+ACHTUNG: Das Projekt liegt in einem von macOS geschützten Ordner:
+  $PROJEKT
+
+Hintergrunddienste dürfen dort nicht lesen. Der Autostart würde in einer
+Absturzschleife enden. Zwei Wege — einer reicht:
+
+  A) Projekt aus dem geschützten Ordner holen (empfohlen, keine Rechte nötig):
+
+       mv "$PROJEKT" "\$HOME/Auto-Listing"
+       cd "\$HOME/Auto-Listing" && ./install.sh
+
+  B) Festplattenvollzugriff erteilen (Projekt bleibt liegen):
+
+       Systemeinstellungen -> Datenschutz & Sicherheit ->
+       Festplattenvollzugriff -> "+" -> diese Datei hinzufügen:
+         $PY
+
+       Einstellungen öffnen mit:
+       open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+
+Der Autostart wird jetzt trotzdem eingerichtet, läuft aber erst nach einem
+dieser beiden Schritte. Prüfen mit:  $PY -m autolister.doctor
+--------------------------------------------------------------------------
+
+HINWEIS
+fi
+
+# --- 4. Autostart (launchd) --------------------------------------------------
 mkdir -p "$AGENTS"
 
 schreibe_plist() {
@@ -55,6 +97,9 @@ schreibe_plist() {
   <key>WorkingDirectory</key><string>$PROJEKT</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <!-- Bremst Neustarts bei dauerhaftem Fehler. Ohne das schreibt ein
+       abstürzender Dienst binnen Minuten hunderte Fehler ins Protokoll. -->
+  <key>ThrottleInterval</key><integer>30</integer>
   <key>StandardOutPath</key><string>$PROJEKT/logs/${label##*.}.log</string>
   <key>StandardErrorPath</key><string>$PROJEKT/logs/${label##*.}.log</string>
   <key>ProcessType</key><string>Background</string>
@@ -73,12 +118,14 @@ schreibe_plist "de.ommotors.autolisting.webapp" "autolister.webapp"
 PORT="$(grep -E '^AUTOLISTER_WEBAPP_PORT=' "$PROJEKT/.env" 2>/dev/null | cut -d= -f2)"
 PORT="${PORT:-8790}"
 echo
-echo "Fertig. Noch zwei Dinge, die nur du machen kannst:"
+echo "Fertig. Auto-Listing läuft in der kostenlosen Betriebsart 'lokal':"
+echo "die Teilenummer liest die in macOS eingebaute Texterkennung, Titel und"
+echo "Preis werden aus den eBay-Vergleichsangeboten abgeleitet. Keine API,"
+echo "keine laufenden Kosten."
 echo
-echo "  1. API-Key eintragen in:  $PROJEKT/.env"
-echo "     (Key holen auf https://console.anthropic.com)"
+echo "Es fehlt nur noch EIN Schritt, den nur du machen kannst:"
 echo
-echo "  2. Einmalig bei eBay einloggen:"
+echo "  Einmalig bei eBay einloggen ('Angemeldet bleiben' anhaken):"
 echo "     $PY -m autolister.login"
 echo
 echo "Danach prüfen mit:  $PY -m autolister.doctor"

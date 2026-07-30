@@ -35,13 +35,16 @@ except Exception:  # pragma: no cover - nur wenn pillow-heif fehlt
     log.warning("pillow-heif nicht verfügbar — HEIC-Fotos können nicht gelesen werden")
 
 
-def _open_normalized(path: Path) -> Image.Image:
+def open_normalized(path: Path) -> Image.Image:
     """Bild öffnen, EXIF-Drehung anwenden, nach RGB konvertieren."""
     img = Image.open(path)
     img = ImageOps.exif_transpose(img)  # sonst liegen Hochkant-Fotos quer
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     return img
+
+
+_open_normalized = open_normalized  # Rückwärtskompatibilität
 
 
 def _resize_one(src: Path, dest_dir: Path, max_edge: int, quality: int) -> Path:

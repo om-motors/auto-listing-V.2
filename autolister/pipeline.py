@@ -88,6 +88,24 @@ def _analyze(produkt: Produkt) -> Produkt:
     return produkt
 
 
+def _umbenennen(alt: Path, neue_nummer: str) -> Path:
+    """Arbeitsordner umbenennen, wenn eBay die Teilenummer korrigiert hat."""
+    neu = config.ERLEDIGT / neue_nummer
+    if alt == neu:
+        return alt
+    try:
+        if neu.exists():
+            for datei in alt.iterdir():
+                shutil.move(str(datei), str(neu / datei.name))
+            alt.rmdir()
+        else:
+            alt.rename(neu)
+        return neu
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Ordner konnte nicht umbenannt werden: %s", exc)
+        return alt
+
+
 def _finish(produkt: Produkt, listing: Dict, res: Dict, result: Dict) -> Path:
     """Fotos ablegen, Bericht schreiben, Bescheid geben."""
     for photo in produkt.photos:
@@ -188,9 +206,29 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Path
     vis = produkt.vision
     nr = vis["teilenummer_kompakt"]
 
-    res = research.search_comparables(page, vis["teilenummer"], nr)
+    # Hat die Texterkennung mehrere mögliche Nummern geliefert, entscheidet
+    # eBay: die echte Nummer bringt Treffer, ein Lesefehler nicht. Das kostet
+    # nichts und fängt genau die Fehler ab, die Muster allein nicht lösen.
+    kandidaten = vis.get("_kandidaten") or []
+    if len(kandidaten) > 1:
+        res = research.pruefe_kandidaten(page, kandidaten)
+        gewinner = res.get("kandidat")
+        if gewinner and gewinner.nummer != nr:
+            log.info("[%s] eBay korrigiert Teilenummer: %s -> %s",
+                     produkt.name, nr, gewinner.nummer)
+            vis["teilenummer"] = gewinner.formatiert
+            vis["teilenummer_kompakt"] = gewinner.nummer
+            vis["hersteller"] = gewinner.hersteller or vis.get("hersteller")
+            nr = gewinner.nummer
+            produkt.work_dir = _umbenennen(produkt.work_dir, nr)
+        if not res.get("geprueft"):
+            vis.setdefault("unsicherheiten", []).append(
+                "Teilenummer konnte auf eBay nicht bestätigt werden.")
+    else:
+        res = research.search_comparables(page, vis["teilenummer"], nr)
+
     log.info("[%s] %d Vergleichsangebote (Suche '%s')", produkt.name,
-             len(res["angebote"]), res["query"])
+             len(res["angebote"]), res.get("query", ""))
 
     listing = compose.compose_listing(vis, res)
     description = compose.build_description(vis, listing)

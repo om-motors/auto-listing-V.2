@@ -29,6 +29,27 @@ def _parse_price(text: str) -> float:
     return float(m.group(1).replace(".", "").replace(",", "."))
 
 
+# Bedientext, den eBay in die Titel einbaut und der kein Teil des Titels ist
+TITEL_MUELL = re.compile(
+    r"\s*(wird in neuem fenster oder tab geöffnet"
+    r"|opens in a new window or tab"
+    r"|neues angebot|new listing|anzeige|sponsored)\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_title(text: str) -> str:
+    """eBay-Bedientext aus dem Titel entfernen.
+
+    eBay hängt an jeden Treffer einen Hinweis für Screenreader an
+    ("Wird in neuem Fenster oder Tab geöffnet"). Ungefiltert landet der im
+    Titel und verfälscht die Auswertung — der Teilname wurde dadurch einmal
+    als "Geöffnet" bestimmt.
+    """
+    erste_zeile = (text or "").split("\n")[0]
+    return TITEL_MUELL.sub(" ", erste_zeile).strip()
+
+
 def _extract_items(page) -> List[Dict]:
     """Titel + Preis aus der Trefferliste ziehen (mehrere Layout-Varianten)."""
     items = []
@@ -42,7 +63,7 @@ def _extract_items(page) -> List[Dict]:
             price_el = el.query_selector(price_sel)
             if not title_el or not price_el:
                 continue
-            title = (title_el.inner_text() or "").strip()
+            title = _clean_title(title_el.inner_text() or "")
             price = _parse_price(price_el.inner_text() or "")
             if not title or title.lower().startswith("shop on ebay") or price <= 0:
                 continue
@@ -52,6 +73,44 @@ def _extract_items(page) -> List[Dict]:
     return items
 
 
+def _suche(page, query: str, verkauft: bool = False) -> List[Dict]:
+    """Auf eBay.de suchen. `verkauft=True` liefert abgeschlossene Verkäufe."""
+    url = (
+        "https://www.ebay.de/sch/i.html?_nkw="
+        + urllib.parse.quote(query)
+        + "&LH_ItemCondition=3000&_sop=12"  # Gebraucht, beste Ergebnisse
+    )
+    if verkauft:
+        url += "&LH_Sold=1&LH_Complete=1"
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    # Verkaufte Artikel zeigt eBay nur eingeloggt. Ohne Login landet man auf
+    # der Anmeldeseite — dann sofort abbrechen, statt auf Treffer zu warten,
+    # die nie kommen (spart rund 12 Sekunden pro Suche).
+    if "signin" in (page.url or "").lower():
+        return []
+    try:
+        page.wait_for_selector("li.s-item, .s-card", timeout=12000)
+    except Exception:
+        pass
+    return _extract_items(page)
+
+
+def _mit_verkauften_ergaenzen(page, query: str, ergebnis: Dict) -> Dict:
+    """Tatsächlich erzielte Verkaufspreise nachladen.
+
+    Laufende Inserate zeigen Wunschpreise — auch solche, die sich seit Monaten
+    nicht verkaufen. Abgeschlossene Verkäufe zeigen, was Käufer wirklich
+    gezahlt haben, und sind damit die ehrlichere Grundlage für den eigenen
+    Preis. Kostet nichts, ist nur ein zusätzlicher Suchparameter.
+    """
+    try:
+        verkauft = _suche(page, query, verkauft=True)
+    except Exception:
+        verkauft = []
+    ergebnis["verkaufte"] = verkauft[:25]
+    return ergebnis
+
+
 def search_comparables(page, teilenummer: str, kompakt: str) -> Dict:
     """Aktive gebrauchte Angebote für die Teilenummer suchen.
 
@@ -59,14 +118,40 @@ def search_comparables(page, teilenummer: str, kompakt: str) -> Dict:
     Suchanfrage zurück.
     """
     for query in _query_variants(teilenummer, kompakt):
-        url = (
-            "https://www.ebay.de/sch/i.html?_nkw="
-            + urllib.parse.quote(query)
-            + "&LH_ItemCondition=3000&_sop=12"  # Gebraucht, beste Ergebnisse
-        )
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(2500)
-        items = _extract_items(page)
+        items = _suche(page, query)
         if items:
-            return {"query": query, "angebote": items[:25]}
-    return {"query": teilenummer, "angebote": []}
+            return _mit_verkauften_ergaenzen(
+                page, query, {"query": query, "angebote": items[:25]})
+    return {"query": teilenummer, "angebote": [], "verkaufte": []}
+
+
+def pruefe_kandidaten(page, kandidaten) -> Dict:
+    """eBay als kostenlosen Prüfstein für die Teilenummer benutzen.
+
+    Eine falsch gelesene Ziffer liefert auf eBay keine oder kaum Treffer, eine
+    echte Teilenummer dagegen sofort mehrere Angebote. Deshalb werden die
+    Kandidaten der Reihe nach durchprobiert und der erste mit echten Treffern
+    gewinnt — das korrigiert Lesefehler, die die Mustererkennung allein nicht
+    auflösen kann.
+
+    Rückgabe: {kandidat, query, angebote, geprueft}
+    """
+    for kandidat in kandidaten[:4]:
+        for query in _query_variants(kandidat.formatiert, kandidat.nummer):
+            items = _suche(page, query)
+            # Nur Treffer zählen, die die Nummer wirklich im Titel führen
+            passend = [
+                i for i in items
+                if kandidat.nummer.lower() in i["titel"].lower().replace(" ", "")
+            ]
+            if len(passend) >= 2:
+                return _mit_verkauften_ergaenzen(page, query, {
+                    "kandidat": kandidat, "query": query,
+                    "angebote": items[:25], "geprueft": True})
+    # Kein Kandidat ließ sich bestätigen — mit dem bestbewerteten weitermachen
+    if kandidaten:
+        beste = kandidaten[0]
+        ergebnis = search_comparables(page, beste.formatiert, beste.nummer)
+        ergebnis.update({"kandidat": beste, "geprueft": False})
+        return ergebnis
+    return {"kandidat": None, "query": "", "angebote": [], "geprueft": False}
