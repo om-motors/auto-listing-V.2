@@ -93,16 +93,21 @@ für `.venv/bin/python` erteilen.
   auswählen" das Prozentfeld öffnen und `2` eintragen.
 - **Rücknahme**: 14 Tage Inland, Käufer zahlt Rückversand, keine internationale
   Rücknahme. Achtung: Das Formular startet mit „Keine Rücknahme"!
+- **Einbauposition**: als Artikelmerkmal **immer weglassen** (Vorgabe
+  2026-07-30, umgesetzt in `config.MERKMALE_AUSLASSEN`). Im **Titel** bleibt
+  die Position erhalten.
 - **Übersetzungsverhältnis** bei Differentialen: leer lassen.
 
-| DHL-Größe | Preis (Käufer zahlt) | typische Teile |
+| Versandstufe | Preis (Käufer zahlt) | typische Teile |
 |---|---|---|
 | Standard | 7,69 € | Halter, Sensoren, Kleinteile, Zierleisten |
 | Mittel | 23,99 € | Scheinwerfer, Spiegel, größere Verkleidungen |
-| Groß | 79,90 € | Stoßstangen, Türverkleidungen |
-| Spedition | 99,90 € | Türen, Hauben, Kotflügel, Sitze |
+| Spedition | 60,00 € | Stoßstangen, Träger, Türen, Hauben, Kotflügel, Sitze |
 
-Im Zweifel die kleinste Stufe wählen und im Bericht darauf hinweisen.
+Alles Sperrige geht per **Spedition zu 60 €** (Vorgabe 2026-07-30). Die frühere
+Stufe „Groß" zu 79,90 € gibt es nicht mehr — sie ist in „Spedition"
+aufgegangen. Im Zweifel die kleinste Stufe wählen und im Bericht darauf
+hinweisen.
 
 ## Erkenntnisse zum eBay-Verkaufsformular
 

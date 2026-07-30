@@ -77,13 +77,22 @@ SETTLE_SECONDS = int(os.environ.get("AUTOLISTER_SETTLE_SECONDS", "25"))
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
 
-# DHL-Versandstufen (Käufer zahlt)
+# Versandstufen (Käufer zahlt). Vorgabe des Nutzers vom 2026-07-30:
+# alles Große geht per Spedition und kostet 60 € — die frühere Stufe "Groß"
+# zu 79,90 € gibt es nicht mehr, sie ist in "Spedition" aufgegangen.
 VERSAND_STUFEN = [
     ("Standard", 7.69, "Halter, Sensoren, Kleinteile, Zierleisten"),
     ("Mittel", 23.99, "Scheinwerfer, Spiegel, größere Verkleidungen"),
-    ("Groß", 79.90, "Stoßstangen, Türverkleidungen"),
-    ("Spedition", 99.90, "Türen, Hauben, Kotflügel, Sitze"),
+    ("Spedition", 60.00, "Stoßstangen, Träger, Türen, Hauben, Kotflügel, Sitze"),
 ]
+
+# Feste Vorgaben des Nutzers, die in jedem Inserat gleich sind
+ANZEIGENTARIF_PROZENT = os.environ.get("AUTOLISTER_ANZEIGENTARIF", "2")
+RUECKNAHME_TAGE = int(os.environ.get("AUTOLISTER_RUECKNAHME_TAGE", "14"))
+RUECKVERSAND_ZAHLT_KAEUFER = True
+
+# Artikelmerkmale, die bewusst NICHT gesetzt werden (Vorgabe des Nutzers)
+MERKMALE_AUSLASSEN = {"Einbauposition"}
 
 
 def aktiver_modus() -> str:

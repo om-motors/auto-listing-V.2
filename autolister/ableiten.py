@@ -69,15 +69,17 @@ VERSAND_STICHWOERTER = [
                    "motor", "getriebe", "differential", "differenzial",
                    "hinterachs", "vorderachs", "achse", "fahrwerk", "klappe",
                    "heckklappe", "dach", "rahmen", "träger komplett")),
-    ("Groß", ("stoßstange", "stossstange", "stoßfänger", "stossfaenger",
-              "türverkleidung", "tuerverkleidung", "verkleidung komplett",
-              "armaturenbrett", "kühlerpaket", "kuehlerpaket", "tank",
-              # Querträger/Aufprallträger sind gut einen Meter lang — die
-              # gingen anfangs als "Standard" durch, weil nur "halter" traf
-              "querträger", "quertraeger", "aufprallträger", "aufpralltraeger",
-              "prallträger", "pralltraeger", "stoßstangenträger",
-              "stossstangentraeger", "träger", "traeger", "schweller",
-              "auspuff", "endschalldämpfer", "endschalldaempfer")),
+    # Früher eine eigene Stufe "Groß" zu 79,90 € — laut Nutzervorgabe geht
+    # alles Sperrige per Spedition zu 60 €, deshalb hier zusammengelegt.
+    ("Spedition", ("stoßstange", "stossstange", "stoßfänger", "stossfaenger",
+                   "türverkleidung", "tuerverkleidung", "verkleidung komplett",
+                   "armaturenbrett", "kühlerpaket", "kuehlerpaket", "tank",
+                   # Querträger/Aufprallträger sind gut einen Meter lang — die
+                   # gingen anfangs als "Standard" durch, weil nur "halter" traf
+                   "querträger", "quertraeger", "aufprallträger", "aufpralltraeger",
+                   "prallträger", "pralltraeger", "stoßstangenträger",
+                   "stossstangentraeger", "träger", "traeger", "schweller",
+                   "auspuff", "endschalldämpfer", "endschalldaempfer")),
     ("Mittel", ("scheinwerfer", "spiegel", "rücklicht", "ruecklicht",
                 "verkleidung", "grill", "kühler", "kuehler", "lüfter",
                 "luefter", "airbag", "display", "steuergerät", "steuergeraet",

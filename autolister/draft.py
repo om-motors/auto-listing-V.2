@@ -83,13 +83,54 @@ def _safe_click(page, locator, warnings: List[str], step: str) -> bool:
         return False
 
 
-def _step(warnings: List[str], name: str, fn) -> bool:
+def _step(warnings: List[str], name: str, fn, pruefen=None) -> bool:
+    """Einen Formularschritt ausführen und das Ergebnis nachkontrollieren.
+
+    `pruefen` ist eine Funktion, die True liefert, wenn der Wert wirklich im
+    Formular steht. Ohne diese Kontrolle meldet ein Schritt Erfolg, sobald
+    kein Fehler auftrat — im Echtlauf trugen so drei Schritte (Artikelmerkmale,
+    Rücknahme, Anzeigentarif) gar nichts ein, und der Bericht behauptete
+    trotzdem, es sei nichts mehr von Hand zu tun. Ein Bericht, der lügt, ist
+    schlimmer als einer, der Arbeit auflistet.
+    """
     try:
         fn()
-        return True
     except Exception as exc:
         warnings.append("%s: %s" % (name, str(exc).splitlines()[0]))
         return False
+
+    if pruefen is None:
+        return True
+    try:
+        if pruefen():
+            return True
+        warnings.append("%s: kein Fehler, aber der Wert steht nicht im Formular" % name)
+    except Exception as exc:
+        warnings.append("%s: Kontrolle fehlgeschlagen (%s)" % (name, str(exc).splitlines()[0]))
+    return False
+
+
+def _feldwert(page, label: str) -> str:
+    """Aktuellen Wert eines Artikelmerkmals auslesen."""
+    feld = _merkmal_feld(page, label)
+    if feld is None:
+        return ""
+    try:
+        return (feld.input_value(timeout=3000) or "").strip()
+    except Exception:
+        return ""
+
+
+def _abschnitt_text(page, ueberschrift: str) -> str:
+    """Sichtbaren Text eines Formularabschnitts holen (für Kontrollen)."""
+    try:
+        anker = page.get_by_text(re.compile(ueberschrift, re.I)).first
+        if not anker.count():
+            return ""
+        block = anker.locator("xpath=ancestor::*[self::div or self::section][4]")
+        return block.inner_text(timeout=4000) or ""
+    except Exception:
+        return ""
 
 
 # Dialoge, die eBay über ein frisch angelegtes Formular legt. Der Text in
@@ -374,11 +415,13 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         "Hersteller": vision.get("hersteller"),
         "Herstellernummer": vision.get("teilenummer_kompakt"),
         "OE/OEM Referenznummer": vision.get("teilenummer_kompakt"),
-        "Einbauposition": listing.get("einbauposition"),
         "Produktart": listing.get("teilname"),
+        # "Einbauposition" steht bewusst nicht hier — siehe
+        # config.MERKMALE_AUSLASSEN (Vorgabe des Nutzers). Im Titel bleibt die
+        # Position erhalten, nur als Artikelmerkmal wird sie nicht gesetzt.
     }
     for label, value in merkmale.items():
-        if not value:
+        if not value or label in config.MERKMALE_AUSLASSEN:
             continue
 
         def set_specific(label=label, value=value):
@@ -403,7 +446,11 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 eigen.click()
             else:
                 page.keyboard.press("Enter")
-        _step(warnings, "Merkmal '%s'" % label, set_specific)
+
+        def kontrolle(label=label, value=value):
+            steht = _feldwert(page, label)
+            return bool(steht) and str(value)[:6].lower() in steht.lower()
+        _step(warnings, "Merkmal '%s'" % label, set_specific, kontrolle)
 
     # --- Preis + Sofort-Kaufen + Preisvorschläge ---
     def set_price():
@@ -444,9 +491,15 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             "input[aria-label*='Anzeigentarif' i], input[aria-label*='Prozent' i]").last
         if not feld.count():
             feld = page.locator("input[inputmode='decimal'], input[type='number']").last
-        feld.fill("2")
+        feld.fill(config.ANZEIGENTARIF_PROZENT)
         page.keyboard.press("Tab")
-    _step(warnings, "Angebot bewerben (2%)", promote_2_percent)
+
+    def bewerben_kontrolle():
+        text = _abschnitt_text(page, r"ANGEBOT BEWERBEN")
+        return config.ANZEIGENTARIF_PROZENT + " %" in text or \
+            config.ANZEIGENTARIF_PROZENT + "%" in text
+    _step(warnings, "Angebot bewerben (%s%%)" % config.ANZEIGENTARIF_PROZENT,
+          promote_2_percent, bewerben_kontrolle)
 
     # --- Rücknahme im Inland aktivieren (Formular startet mit 'Keine Rücknahme') ---
     def enable_returns():
@@ -469,17 +522,44 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         if not geoeffnet:
             raise RuntimeError("Abschnitt 'Details zur Lieferung' nicht gefunden")
 
+        # 1) Inlandsrücknahme einschalten
         schalter = page.locator("label", has_text=re.compile(r"^\s*Rücknahme im Inland")).first
         if not schalter.count():
             schalter = page.get_by_text(re.compile(r"Rücknahme im Inland", re.I)).first
         schalter.click(timeout=8000)
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(1500)
+
+        # 2) Frist auf 14 Tage (Vorgabe des Nutzers)
+        frist = "%d Tage" % config.RUECKNAHME_TAGE
+        auswahl = page.get_by_text(re.compile(r"^%s$" % re.escape(frist))).first
+        if auswahl.count() and auswahl.is_visible():
+            auswahl.click(timeout=5000)
+        else:
+            liste = page.locator("select").filter(
+                has_text=re.compile("Tage")).first
+            if liste.count():
+                liste.select_option(label=frist)
+        page.wait_for_timeout(800)
+
+        # 3) Rückversand zahlt der Käufer
+        if config.RUECKVERSAND_ZAHLT_KAEUFER:
+            kaeufer = page.get_by_text(
+                re.compile(r"Käufer (zahlt|trägt).*(Rückversand|Rücksendung)", re.I)).first
+            if kaeufer.count() and kaeufer.is_visible():
+                kaeufer.click(timeout=5000)
+                page.wait_for_timeout(600)
+
         fertig = page.get_by_role(
             "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
         if fertig.count() and fertig.is_visible():
             _safe_click(page, fertig, warnings, "Rücknahme übernehmen")
             page.wait_for_timeout(1500)
-    _step(warnings, "Rücknahme aktivieren", enable_returns)
+
+    def ruecknahme_kontrolle():
+        text = _abschnitt_text(page, r"Details zur Lieferung")
+        # Solange dort "Keine Rücknahme" steht, hat der Schritt nichts bewirkt
+        return "Keine Rücknahme" not in text and "Rücknahme" in text
+    _step(warnings, "Rücknahme aktivieren", enable_returns, ruecknahme_kontrolle)
 
     # --- Versandkosten (DHL-Stufe) ---
     def set_shipping():
@@ -502,7 +582,10 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             "button", name=re.compile(r"(Fertig|Übernehmen|Speichern|OK)", re.I)).first
         if fertig.count() and fertig.is_visible():
             _safe_click(page, fertig, warnings, "Versanddialog schließen")
-    if not _step(warnings, "Versandkosten", set_shipping):
+    def versand_kontrolle():
+        erwartet = ("%.2f" % listing.get("versandpreis", 0)).replace(".", ",")
+        return erwartet in _abschnitt_text(page, r"Wer zahlt")
+    if not _step(warnings, "Versandkosten", set_shipping, versand_kontrolle):
         warnings.append("Versandstufe '%s' (%.2f €) bitte im Entwurf von Hand setzen."
                         % (listing.get("versandstufe"), listing.get("versandpreis", 0)))
 
