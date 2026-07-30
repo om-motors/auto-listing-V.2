@@ -1,64 +1,89 @@
 # Auto-Listing — eBay-Entwürfe aus Produktfotos
 
-Der Nutzer verkauft gebrauchte Kfz-Teile auf eBay.de (überwiegend Original-Teile von Audi/VW aus Fahrzeugen mit geringer Laufleistung). Aufgabe von Claude: Aus Produktfotos einen **kompletten eBay-Entwurf** vorbereiten. Der Nutzer prüft den Entwurf nur noch und veröffentlicht ihn selbst.
+Der Nutzer verkauft gebrauchte Kfz-Teile auf eBay.de (überwiegend Original-Teile
+von Audi/VW/Mercedes aus Fahrzeugen mit geringer Laufleistung).
 
-## Ablauf pro Produkt
+**Wichtig: Das ist inzwischen eine eigenständige Python-Anwendung, keine
+Claude-Aufgabe mehr.** Die Pipeline läuft als Hintergrunddienst auf dem Mac und
+braucht Claude nicht. Siehe [README.md](README.md) für die Bedienung.
 
-Trigger: Der Nutzer schickt Produktfotos im Chat ODER legt sie in `Eingang/` ab (ein Unterordner pro Produkt, oder lose Fotos, die erkennbar zum selben Teil gehören).
+Claude arbeitet hier also **am Code**, nicht an einzelnen Inseraten.
 
-### 1. Fotos analysieren
-- Alle Fotos lesen. Die **Teilenummer** ist immer auf dem Teil eingestanzt oder auf einem Etikett sichtbar (z.B. `8T0 807 284`, oft mit Suffix-Buchstabe wie `C`). Sorgfältig lesen — 0/O und 8/B verwechselbar. Bei Unsicherheit mit Zoom auf den Bildausschnitt prüfen.
-- Zusätzlich erfassen: Markenlogo (Audi-Ringe, VW etc.), Materialkennzeichnung, „Germany", Links/Rechts-Hinweise.
+## Aufbau
 
-### 2. Teil identifizieren + Marktrecherche (eBay.de im Browser)
-- Auf ebay.de nach der Teilenummer suchen (mit und ohne Leerzeichen/Suffix probieren).
-- Aus den Treffern ableiten: **Teilname** (z.B. „Halter Stoßfänger vorne links"), **passende Fahrzeuge/Modellcodes** (z.B. „Audi A5 8T 8TA 8F"), übliche **Kategorie**.
-- **Preis**: aktive vergleichbare Angebote (gebraucht, Original) sammeln, Ausreißer ignorieren, **Marktdurchschnitt** als Preis ansetzen. Preisbasis im Bericht an den Nutzer dokumentieren (welche Angebote, welche Preise).
+| Modul | Aufgabe |
+|---|---|
+| `autolister/watcher.py` | Überwacht `Eingang/`, startet die Pipeline nach Ruhephase |
+| `autolister/webapp.py` | Upload-Website (Port 8790), auch vom Handy nutzbar |
+| `autolister/pipeline.py` | Orchestrierung: Phase 1 parallel analysieren, Phase 2 ein Browser für alles |
+| `autolister/images.py` | HEIC-Umwandlung, Verkleinern (13,7 MB → 1,4 MB) |
+| `autolister/vision.py` | Fotos → Teilenummer, zweistufig bei Unsicherheit |
+| `autolister/research.py` | eBay-Suche nach Vergleichsangeboten |
+| `autolister/compose.py` | Titel, Preis (deterministisch gerechnet), Versandstufe |
+| `autolister/draft.py` | Formular ausfüllen + Entwurf speichern (Playwright) |
+| `autolister/llm.py` | Claude-Zugriff: API, sonst `claude -p` als Fallback |
+| `autolister/doctor.py` | Selbsttest der Voraussetzungen |
+| `autolister/notify.py` | Berichte + macOS-Mitteilungen |
 
-### 3. Entwurfsdaten erstellen
-- **Titel** (max. 80 Zeichen): `Original <Marke> <Modellcodes> <Teilname> <Position> <Teilenummer>` — Beispiel: `Original Audi A5 8T 8TA 8F Halter Stoßfänger vorne links 8T0807284`
-- **Zustand**: immer **„Gebraucht"**
-- **Beschreibung**: Vorlage aus `Vorlagen/beschreibung.md`
-- **Artikelmerkmale**: Hersteller, Herstellernummer (= Teilenummer), OE/OEM-Referenznummer, Einbauposition, Ursprungsland (falls erkennbar, z.B. „Germany" auf dem Teil)
-- **Format**: Sofort-Kaufen (keine Auktion)
-- **Versand**: DHL, Größe nach Teil schätzen (siehe Tabelle unten). Im Zweifel kleinste Größe wählen und den Nutzer im Bericht auf die Schätzung hinweisen.
+## Unverrückbare Regeln
+
+- **Niemals veröffentlichen.** Nur Entwürfe speichern. In `draft.py` sperrt die
+  Konstante `FORBIDDEN` jeden Klick auf „anbieten", „einstellen", „verkaufen".
+  Diese Sperre darf nicht entfernt oder aufgeweicht werden.
+- **CAPTCHAs werden nicht gelöst oder umgangen.** Bei einer Sicherheitsabfrage
+  bricht die Pipeline mit `CaptchaBlocked` ab und bittet den Nutzer.
+- **Preise werden gerechnet, nicht geschätzt.** Das Modell wählt nur aus, welche
+  Angebote vergleichbar sind; den Mittelwert bildet Python in `compose.py`.
+
+## Fachliche Vorgaben des Nutzers
+
+- **Titel** (max. 80 Zeichen): `Original <Marke> <Modellcodes> <Teilname> <Position> <Teilenummer>`
+- **Zustand**: immer „Gebraucht"
+- **Format**: Sofort-Kaufen, keine Auktion
+- **Preisvorschläge zulassen**: immer an
+- **Angebot bewerben**: immer an, Anzeigentarif **2 %** (Vorgabe 2026-07-11).
+  Die Schnellauswahl bietet nur 8/10/12 % — über „Eigenen Anzeigentarif
+  auswählen" das Prozentfeld öffnen und `2` eintragen.
+- **Rücknahme**: 14 Tage Inland, Käufer zahlt Rückversand, keine internationale
+  Rücknahme. Achtung: Das Formular startet mit „Keine Rücknahme"!
+- **Übersetzungsverhältnis** bei Differentialen: leer lassen.
 
 | DHL-Größe | Preis (Käufer zahlt) | typische Teile |
 |---|---|---|
-| Standard (kleinste) | 7,69 € | Halter, Sensoren, Kleinteile, Zierleisten |
+| Standard | 7,69 € | Halter, Sensoren, Kleinteile, Zierleisten |
 | Mittel | 23,99 € | Scheinwerfer, Spiegel, größere Verkleidungen |
 | Groß | 79,90 € | Stoßstangen, Türverkleidungen |
-| Spedition (größte) | 99,90 € | Türen, Hauben, Kotflügel, Sitze |
+| Spedition | 99,90 € | Türen, Hauben, Kotflügel, Sitze |
 
-- **Rücknahme**: 14 Tage Inland, Käufer zahlt Rückversand, keine internationale Rücknahme.
+Im Zweifel die kleinste Stufe wählen und im Bericht darauf hinweisen.
 
-### 4. Entwurf bei eBay anlegen (Browser-Automation)
-- Claude-in-Chrome verwenden (der Nutzer ist in Chrome bei eBay eingeloggt).
-- `https://www.ebay.de/sl/sell` öffnen, Titel/Teilenummer eingeben, ggf. eBay-Vorschlag übernehmen.
-- Fotos per Datei-Upload hochladen (Fotos liegen lokal in `Eingang/`; Chat-Anhänge zuerst dorthin speichern).
-- Alle Felder ausfüllen, dann **„Entwurf speichern"** — der Entwurf erscheint auch in der eBay-App unter „Entwürfe".
-- **WICHTIG: Niemals veröffentlichen.** Der Button „Artikel anbieten"/„Verkaufen" wird ausschließlich vom Nutzer selbst geklickt. Claude speichert nur Entwürfe.
+## Erkenntnisse zum eBay-Verkaufsformular
 
-### 5. Abschluss
-- Fotos des Produkts nach `Erledigt/<Teilenummer>/` verschieben.
-- Bericht an den Nutzer: Teilenummer, Titel, Preis (+ Preisbasis/Vergleichsangebote), gewählte Versandgröße, offene Punkte zum Prüfen.
+- Einstieg: `ebay.de/sl/prelist/suggest` → Titel eingeben → „Weiter" → das
+  Formular legt sofort einen Entwurf an (`draftId` in der URL).
+- Die vorgeschlagene **Kategorie ist oft falsch** — prüfen und über
+  „Bearbeiten" per Suche korrigieren.
+- Artikelmerkmale sind Such-Dropdowns; fehlende Werte über „Eigenen Wert
+  hinzufügen" anlegen.
+- Speichern über **„Speichern"** ganz unten — *nicht* „Artikel kostenlos
+  einstellen", das würde veröffentlichen. Danach landet man in
+  `ebay.de/sh/lst/drafts`.
+- **Foto-Upload:** direkt per `set_input_files()` in das `input[type=file]`.
+  Der frühere Umweg über einen lokalen CORS-Server war nur wegen der
+  Chrome-Erweiterung nötig und ist entfallen.
 
-## Erkenntnisse aus bisherigen Durchläufen (Web-Verkaufsformular)
+## Wenn eBay das Formular umbaut
 
-- Einstieg: `ebay.de/sl/prelist/suggest` → Titel eingeben → „Weiter" → das Formular legt sofort einen Entwurf an (draftId in der URL).
-- Die automatisch vorgeschlagene **Kategorie ist oft falsch** — immer prüfen und über „Bearbeiten" per Suche korrigieren.
-- Artikelmerkmale sind Such-Dropdowns; fehlende Werte (z.B. „Mercedes-Benz" als Hersteller) über „Eigenen Wert hinzufügen" anlegen.
-- **Preisvorschläge zulassen** aktivieren (macht der Nutzer bei seinen Listings immer).
-- **„Angebot bewerben" IMMER aktivieren mit Anzeigentarif 2 %** (Vorgabe des Nutzers, 2026-07-11). Die Schnellauswahl bietet nur 8/10/12 % — über den Link „Eigenen Anzeigentarif auswählen" das Prozentfeld öffnen und `2` eintragen.
-- **Rücknahme aktivieren**: Das Formular startet mit „Keine Rücknahme"! Unter „Details zur Lieferung" → „Rücknahme im Inland" einschalten (Standardwerte 14 Tage / Käufer zahlt stimmen dann).
-- **Übersetzungsverhältnis** bei Differentialen: leer lassen (Vorgabe des Nutzers).
-- **Foto-Upload** (Chrome-Erweiterung blockiert file_upload für lokale Ordner): Lokalen HTTP-Server mit CORS+PNA-Headern starten (Vorlage: `Vorlagen/cors_server.py`, Port 8748, Verzeichnis = Foto-Ordner), dann per javascript_tool im eBay-Tab die Dateien fetchen, in eine DataTransfer packen, dem `input[type=file]` zuweisen und ein `change`-Event dispatchen. Danach Server per `pkill -f cors_server.py` beenden. Ein simpler `python3 -m http.server` reicht NICHT (fehlende CORS-Header → „Failed to fetch").
-- Speichern über den Button **„Speichern"** ganz unten (nicht „Artikel kostenlos einstellen" — das würde veröffentlichen!). Danach landet man in „Entwürfe verwalten" (`ebay.de/sh/lst/drafts`).
-- Rücknahme-Einstellungen kommen aus den Account-Vorgaben (14 Tage Inland) — im Entwurf nicht anfassen.
-- Chat-Anhänge liegen NICHT als Dateien auf der Festplatte: Für den Foto-Upload muss der Nutzer die Bilder in `Eingang/` ablegen (AirDrop). Ohne Fotos trotzdem den kompletten Entwurf anlegen und die Fotos nachreichen (Entwurf öffnen → „Vom Computer hochladen"-Feld per file_upload befüllen).
+Die Selektoren in `draft.py` sind der wartungsanfälligste Teil. Jeder Schritt
+läuft über `_step()` und schreibt bei Misserfolg eine Warnung in den Bericht,
+statt den Durchlauf abzubrechen — häufen sich dort Meldungen, hat sich das
+Formular geändert. Zum Nachsehen:
 
-## Bei mehreren Produkten
-Fotos zuerst nach Teil gruppieren (gleiche Teilenummer / gleiches Objekt), dann jedes Teil einzeln komplett durchziehen und am Ende einen Sammelbericht liefern.
+```bash
+.venv/bin/python -m autolister.pipeline Eingang/<ordner> --trockenlauf
+```
+
+Füllt alles aus, speichert nichts, Browser bleibt sichtbar.
 
 ## graphify
 
