@@ -1,5 +1,14 @@
+# Grundausstattung
 playwright>=1.55
 watchdog>=6.0
 flask>=3.0
-anthropic>=0.100
 python-dotenv>=1.0
+pillow>=11.0
+pillow-heif>=1.0
+
+# Kostenlose Texterkennung über das in macOS eingebaute Vision-Framework
+pyobjc-framework-Vision>=10.0
+pyobjc-framework-Quartz>=10.0
+
+# Nur für die optionale, kostenpflichtige Betriebsart "api"
+anthropic>=0.100

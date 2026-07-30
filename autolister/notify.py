@@ -24,23 +24,39 @@ def write_report(vision: Dict, listing: Dict, research: Dict,
     nr = vision.get("teilenummer_kompakt", "unbekannt")
     path = config.BERICHTE / ("%s_%s.md" % (time.strftime("%Y-%m-%d_%H%M"), nr))
 
+    spanne = listing.get("preisspanne")
     lines = [
         "# Entwurf: %s" % listing.get("titel", nr),
         "",
         "- **Teilenummer:** %s (Konfidenz: %s)" % (
             vision.get("teilenummer"), vision.get("konfidenz_teilenummer")),
-        "- **Preis:** %s €" % (("%.2f" % listing["preis"]) if listing.get("preis") else "MANUELL SETZEN"),
+        "- **Hersteller:** %s" % (vision.get("hersteller") or "—"),
+        "- **Preis:** %s €%s" % (
+            ("%.2f" % listing["preis"]) if listing.get("preis") else "MANUELL SETZEN",
+            ("  (Markt: %.0f–%.0f €)" % spanne) if spanne else ""),
+        "- **Preisquelle:** %s" % listing.get("preisquelle", "—"),
         "- **Versand:** %s (%.2f €) — geschätzt, bitte prüfen" % (
             listing.get("versandstufe"), listing.get("versandpreis", 0)),
         "- **Entwurf:** %s" % draft.get("draft_url", "—"),
         "- **Fotos:** %d Stück" % len(photos),
+        "- **Betriebsart:** %s%s" % (
+            config.aktiver_modus(),
+            " (kostenlos)" if config.aktiver_modus() == "lokal" else ""),
         "",
-        "## Preisbasis (Vergleichsangebote, Suche: \"%s\")" % research.get("query", ""),
+        "## Preisbasis (Suche: \"%s\")" % research.get("query", ""),
     ]
     for c in listing.get("preisbasis", []):
         lines.append("- %.2f € — %s" % (c["preis"], c["titel"]))
     if not listing.get("preisbasis"):
         lines.append("- keine —")
+
+    kandidaten = vision.get("_kandidaten") or []
+    if len(kandidaten) > 1:
+        lines += ["", "## Gelesene Teilenummer-Kandidaten"]
+        for k in kandidaten[:5]:
+            marker = " **<- gewählt**" if k.nummer == nr else ""
+            lines.append("- `%s` (%.1f Punkte, aus %r)%s" % (
+                k.nummer, k.punkte, k.quelle, marker))
 
     punkte = list(listing.get("hinweise_fuer_nutzer", []))
     punkte += list(vision.get("unsicherheiten", []))

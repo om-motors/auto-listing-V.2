@@ -46,6 +46,18 @@ UPLOAD_JPEG_QUALITY = int(os.environ.get("AUTOLISTER_UPLOAD_JPEG_QUALITY", "92")
 # läuft parallel; die Browser-Arbeit bleibt bewusst seriell).
 VISION_PARALLEL = int(os.environ.get("AUTOLISTER_VISION_PARALLEL", "4"))
 
+# --- Betriebsart -------------------------------------------------------------
+# "lokal" = kostenlos: macOS-Texterkennung + feste Regeln, keine KI-Kosten.
+# "cli"   = kostenlos im Rahmen des bestehenden Claude-Abos (braucht claude-CLI)
+# "api"   = kostenpflichtig über ANTHROPIC_API_KEY, beste Qualität
+# "auto"  = nimmt api, wenn ein Key da ist, sonst cli, sonst lokal
+MODUS = os.environ.get("AUTOLISTER_MODUS", "lokal").strip().lower()
+
+# Auflösung für die Texterkennung. Eingestanzte Nummern sind kontrastarm —
+# Verkleinern kostet hier messbar Trefferquote, deshalb bewusst hoch. Bei
+# 4032 px kam die vollständige Nummer, bei 3000 px nur noch bruchstückhaft.
+OCR_MAX_EDGE = int(os.environ.get("AUTOLISTER_OCR_MAX_EDGE", "4200"))
+
 # Browser sichtbar laufen lassen (empfohlen: eBay blockt Headless eher)
 HEADLESS = os.environ.get("AUTOLISTER_HEADLESS", "0") == "1"
 
@@ -64,6 +76,22 @@ VERSAND_STUFEN = [
     ("Groß", 79.90, "Stoßstangen, Türverkleidungen"),
     ("Spedition", 99.90, "Türen, Hauben, Kotflügel, Sitze"),
 ]
+
+
+def aktiver_modus() -> str:
+    """Welche Betriebsart läuft tatsächlich?
+
+    "auto" entscheidet sich anhand dessen, was verfügbar ist. Alles andere
+    wird so genommen, wie es in der .env steht.
+    """
+    if MODUS != "auto":
+        return MODUS if MODUS in ("lokal", "cli", "api") else "lokal"
+    if ANTHROPIC_API_KEY:
+        return "api"
+    import shutil
+    if shutil.which(CLAUDE_CLI):
+        return "cli"
+    return "lokal"
 
 
 def ensure_dirs() -> None:

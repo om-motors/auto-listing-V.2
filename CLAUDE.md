@@ -17,13 +17,29 @@ Claude arbeitet hier also **am Code**, nicht an einzelnen Inseraten.
 | `autolister/webapp.py` | Upload-Website (Port 8790), auch vom Handy nutzbar |
 | `autolister/pipeline.py` | Orchestrierung: Phase 1 parallel analysieren, Phase 2 ein Browser für alles |
 | `autolister/images.py` | HEIC-Umwandlung, Verkleinern (13,7 MB → 1,4 MB) |
-| `autolister/vision.py` | Fotos → Teilenummer, zweistufig bei Unsicherheit |
-| `autolister/research.py` | eBay-Suche nach Vergleichsangeboten |
-| `autolister/compose.py` | Titel, Preis (deterministisch gerechnet), Versandstufe |
+| `autolister/ocr.py` | **Kostenlose Texterkennung** über das macOS-Vision-Framework |
+| `autolister/partnumber.py` | Teilenummern per Regex je Hersteller, Mehrheitsentscheid |
+| `autolister/ableiten.py` | Teilname/Modellcodes/Versandstufe aus eBay-Titeln auszählen |
+| `autolister/vision.py` | Fotos → Teilenummer (lokal oder per Bildmodell) |
+| `autolister/research.py` | eBay-Suche, Kandidatenprüfung, verkaufte Artikel |
+| `autolister/compose.py` | Titel, Preis (Median + Quartilsfilter), Versandstufe |
 | `autolister/draft.py` | Formular ausfüllen + Entwurf speichern (Playwright) |
-| `autolister/llm.py` | Claude-Zugriff: API, sonst `claude -p` als Fallback |
+| `autolister/llm.py` | Optionaler Claude-Zugriff: API, sonst `claude -p` |
 | `autolister/doctor.py` | Selbsttest der Voraussetzungen |
 | `autolister/notify.py` | Berichte + macOS-Mitteilungen |
+
+## Betriebsarten
+
+`config.aktiver_modus()` entscheidet, welcher Weg läuft — gesteuert über
+`AUTOLISTER_MODUS` in der `.env`:
+
+- **`lokal` (Standard, kostenlos)** — `ocr.py` + `partnumber.py` + `ableiten.py`.
+  Keine API, keine laufenden Kosten. Das ist der Weg, der gepflegt werden muss.
+- **`cli`** — über ein bestehendes Claude-Abo (`claude -p`).
+- **`api`** — kostenpflichtig, bestes Ergebnis bei schlechten Fotos.
+
+Wichtig: `vision.py` und `compose.py` fallen bei einem KI-Fehler **automatisch
+auf `lokal` zurück**, statt abzubrechen. Diese Rückfallebene nicht entfernen.
 
 ## Unverrückbare Regeln
 
@@ -32,8 +48,39 @@ Claude arbeitet hier also **am Code**, nicht an einzelnen Inseraten.
   Diese Sperre darf nicht entfernt oder aufgeweicht werden.
 - **CAPTCHAs werden nicht gelöst oder umgangen.** Bei einer Sicherheitsabfrage
   bricht die Pipeline mit `CaptchaBlocked` ab und bittet den Nutzer.
-- **Preise werden gerechnet, nicht geschätzt.** Das Modell wählt nur aus, welche
-  Angebote vergleichbar sind; den Mittelwert bildet Python in `compose.py`.
+- **Preise werden gerechnet, nicht geschätzt.** `compose.py` bildet den
+  **Median** der Vergleichsangebote und wirft vorher alles außerhalb des
+  1,5-fachen Quartilsabstands weg. Kein Mittelwert: der Markt ist stark
+  gespreizt (gemessen 140 € bis 1236 € für dasselbe Teil), da zieht ein
+  Mittelwert nach oben.
+- **Kostenlos ist der Normalfall.** Neue Funktionen müssen ohne API auskommen
+  oder sauber darauf verzichten können.
+
+## Erkenntnisse zur Texterkennung
+
+- Eingestanzte Teilenummern stehen oft **hochkant**. Deshalb liest `ocr.py`
+  jedes Foto in allen vier Drehungen. Am Testteil kam bei 0° nur `205` /
+  `351 00 05` heraus, bei 270° die vollständige Nummer `A 205 351 00 05`.
+- **Nicht verkleinern.** Bei 3000 px zerfiel die Nummer wieder in Fragmente,
+  bei 4200 px war sie vollständig. Daher `OCR_MAX_EDGE=4200`.
+- Herstellerlogos werden als `©`, `®`, `@`, `•` oder `S` gelesen, Lücken
+  zwischen Zifferngruppen als `.` oder `:` — beides begradigt
+  `partnumber._begradigen()`.
+- **eBay ist der beste Prüfstein**: bei mehreren Lesarten entscheidet
+  `research.pruefe_kandidaten()`. Die echte Nummer bringt Treffer, ein
+  Lesefehler nicht. Das kostet nichts und fing im Test `A2033510005`
+  (Fehllesung) gegen `A2053510005` (korrekt) ab.
+- eBay hängt an jeden Suchtreffer „Wird in neuem Fenster oder Tab geöffnet" an.
+  Ungefiltert wurde daraus einmal der Teilname „Geöffnet" — entfernt in
+  `research._clean_title()`.
+
+## Datenschutzsperre von macOS
+
+Liegt das Projekt in `~/Desktop`, `~/Documents` oder `~/Downloads`, bekommen
+launchd-Dienste dort ein `Operation not permitted` — wortlos, ohne Nachfrage,
+in einer Neustartschleife. `doctor._check_datenschutzsperre()` erkennt das.
+Lösung: Projekt nach `~/Auto-Listing` verschieben oder Festplattenvollzugriff
+für `.venv/bin/python` erteilen.
 
 ## Fachliche Vorgaben des Nutzers
 

@@ -42,15 +42,35 @@ def _check_browser() -> Tuple[str, str]:
         return FAIL, "Playwright-Problem: %s" % exc
 
 
-def _check_claude_zugang() -> Tuple[str, str]:
-    if config.ANTHROPIC_API_KEY:
-        return OK, "ANTHROPIC_API_KEY gesetzt (Modell: %s)" % config.VISION_MODEL
-    if shutil.which(config.CLAUDE_CLI):
-        return WARN, ("Kein API-Key — es wird die claude-CLI verwendet. "
-                      "Das ist deutlich langsamer. Empfehlung: API-Key in .env eintragen.")
-    return FAIL, ("Kein Claude-Zugang! Weder ANTHROPIC_API_KEY in der .env noch die "
-                  "claude-CLI gefunden. Key holen auf console.anthropic.com, dann "
-                  "in die Datei .env eintragen (Vorlage: .env.example).")
+def _check_betriebsart() -> Tuple[str, str]:
+    modus = config.aktiver_modus()
+    if modus == "lokal":
+        from . import ocr
+        if not ocr.verfuegbar():
+            return FAIL, ("Betriebsart 'lokal', aber die macOS-Texterkennung fehlt  ->  "
+                          ".venv/bin/pip install pyobjc-framework-Vision "
+                          "pyobjc-framework-Quartz")
+        return OK, "Betriebsart 'lokal' — kostenlos, alles läuft auf diesem Mac"
+    if modus == "api":
+        if not config.ANTHROPIC_API_KEY:
+            return FAIL, "Betriebsart 'api', aber ANTHROPIC_API_KEY fehlt in der .env"
+        return WARN, ("Betriebsart 'api' — KOSTENPFLICHTIG pro Foto (Modell: %s). "
+                      "Kostenlos wäre AUTOLISTER_MODUS=lokal" % config.VISION_MODEL)
+    if modus == "cli":
+        if not shutil.which(config.CLAUDE_CLI):
+            return FAIL, ("Betriebsart 'cli', aber die claude-CLI wurde nicht gefunden  ->  "
+                          "AUTOLISTER_MODUS=lokal in die .env schreiben")
+        return OK, "Betriebsart 'cli' — läuft über das bestehende Claude-Abo"
+    return FAIL, "Unbekannte Betriebsart %r (erlaubt: lokal, cli, api, auto)" % modus
+
+
+def _check_texterkennung() -> Tuple[str, str]:
+    from . import ocr
+    if not ocr.verfuegbar():
+        return WARN, ("macOS-Texterkennung nicht installiert (nur nötig für die "
+                      "kostenlose Betriebsart)  ->  .venv/bin/pip install "
+                      "pyobjc-framework-Vision pyobjc-framework-Quartz")
+    return OK, "macOS-Texterkennung einsatzbereit (kostenlos, lokal)"
 
 
 def _check_ebay_login() -> Tuple[str, str]:
@@ -86,6 +106,46 @@ def _check_ordner() -> Tuple[str, str]:
     return OK, "Ordner und Vorlagen vorhanden"
 
 
+def _check_datenschutzsperre() -> Tuple[str, str]:
+    """macOS sperrt Schreibtisch/Dokumente/Downloads für Hintergrunddienste.
+
+    Das ist die häufigste Ursache dafür, dass der Autostart eingerichtet ist,
+    aber nichts passiert: der Dienst startet, bekommt beim Lesen ein
+    "Operation not permitted" und stürzt wortlos ab — in einer Schleife.
+    """
+    projekt = str(config.PROJECT_DIR)
+    heim = str(Path.home())
+    geschuetzt = any(
+        projekt.startswith("%s/%s/" % (heim, ordner))
+        for ordner in ("Desktop", "Documents", "Downloads",
+                       "Schreibtisch", "Dokumente")
+    )
+
+    # Belegt das Protokoll, dass es tatsächlich klemmt?
+    log = config.LOGS / "watcher.log"
+    blockiert = False
+    if log.exists():
+        try:
+            ende = log.read_text(errors="ignore")[-4000:]
+            blockiert = "Operation not permitted" in ende or "PermissionError" in ende
+        except Exception:
+            pass
+
+    if blockiert:
+        return FAIL, (
+            "macOS blockiert den Hintergrunddienst (Datenschutzsperre). Entweder\n"
+            "                          das Projekt aus dem geschützten Ordner holen:\n"
+            "                            mv '%s' ~/Auto-Listing && cd ~/Auto-Listing && ./install.sh\n"
+            "                          oder Festplattenvollzugriff geben für:\n"
+            "                            %s/.venv/bin/python" % (projekt, projekt))
+    if geschuetzt:
+        return WARN, (
+            "Projekt liegt in einem geschützten Ordner (%s). Läuft im Terminal, "
+            "aber der Autostart braucht Festplattenvollzugriff oder einen Umzug "
+            "nach ~/Auto-Listing." % projekt.replace(heim, "~"))
+    return OK, "Speicherort ist für Hintergrunddienste zugänglich"
+
+
 def _check_autostart() -> Tuple[str, str]:
     agents = Path.home() / "Library" / "LaunchAgents"
     vorhanden = [
@@ -93,27 +153,35 @@ def _check_autostart() -> Tuple[str, str]:
                     "de.ommotors.autolisting.webapp.plist")
         if (agents / n).exists()
     ]
-    if len(vorhanden) == 2:
-        try:
-            out = subprocess.run(["launchctl", "list"], capture_output=True,
-                                 text=True, timeout=10).stdout
-            laufend = out.count("de.ommotors.autolisting")
-            if laufend >= 2:
-                return OK, "Autostart aktiv (Watcher + Upload-Website laufen)"
-            return WARN, "Autostart eingerichtet, aber nicht geladen  ->  ./install.sh"
-        except Exception:
-            return WARN, "Autostart eingerichtet, Status nicht prüfbar"
-    if vorhanden:
-        return WARN, "Autostart nur teilweise eingerichtet  ->  ./install.sh"
-    return WARN, "Kein Autostart eingerichtet  ->  ./install.sh"
+    if len(vorhanden) != 2:
+        if vorhanden:
+            return WARN, "Autostart nur teilweise eingerichtet  ->  ./install.sh"
+        return WARN, "Kein Autostart eingerichtet  ->  ./install.sh"
+    try:
+        out = subprocess.run(["launchctl", "list"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except Exception:
+        return WARN, "Autostart eingerichtet, Status nicht prüfbar"
+
+    zeilen = [z for z in out.splitlines() if "de.ommotors.autolisting" in z]
+    if len(zeilen) < 2:
+        return WARN, "Autostart eingerichtet, aber nicht geladen  ->  ./install.sh"
+    # Erste Spalte ist die PID; "-" heißt: läuft gerade nicht
+    laufen = [z for z in zeilen if not z.split("\t")[0].strip() == "-"]
+    if not laufen:
+        return WARN, ("Dienste sind geladen, laufen aber nicht — meist die "
+                      "Datenschutzsperre (siehe Zeile darüber)")
+    return OK, "Autostart aktiv (%d von 2 Diensten laufen)" % len(laufen)
 
 
 CHECKS = [
     ("Python-Pakete", _check_python_pakete),
     ("Browser", _check_browser),
-    ("Claude-Zugang", _check_claude_zugang),
+    ("Betriebsart", _check_betriebsart),
+    ("Texterkennung", _check_texterkennung),
     ("Ordner/Vorlagen", _check_ordner),
     ("eBay-Login", _check_ebay_login),
+    ("Speicherort", _check_datenschutzsperre),
     ("Autostart", _check_autostart),
 ]
 

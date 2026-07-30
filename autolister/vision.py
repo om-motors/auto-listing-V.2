@@ -1,17 +1,21 @@
-"""Schritt 1: Produktfotos analysieren — Teilenummer, Marke, Position etc.
+"""Schritt 1: Fotos auswerten — Teilenummer, Hersteller, Position.
 
-Zweistufig für Tempo: erst alle Fotos klein (1568 px, schneller Upload).
-Nur wenn Claude die Teilenummer dabei nicht sicher lesen konnte, läuft ein
-zweiter Durchgang mit hochauflösenden Bildern. So zahlt der Normalfall nicht
-für den Ausnahmefall.
+Zwei Betriebsarten:
+
+* **lokal** (Standard, kostenlos): die in macOS eingebaute Texterkennung liest
+  den Text von den Fotos, feste Muster ziehen daraus die Teilenummer. Kostet
+  nichts und dauert rund eine Sekunde. Mehrere Kandidaten werden später von
+  eBay selbst gegengeprüft (`research.pruefe_kandidaten`).
+* **KI** (optional): ein Bildmodell schaut sich die Fotos an. Genauer bei
+  schwierigen Fotos, aber kostenpflichtig bzw. auf ein Abo angewiesen.
 """
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
-from . import config, images, llm
+from . import config, images, llm, ocr, partnumber
 
 log = logging.getLogger("autolister")
 
@@ -20,6 +24,7 @@ PROMPT = """Du analysierst Fotos eines gebrauchten Kfz-Teils für ein eBay-Inser
 Die Teilenummer ist auf dem Teil eingestanzt oder steht auf einem Etikett
 (Beispiele: "8T0 807 284 C", "A 205 351 00 05"). Lies sie SORGFÄLTIG —
 0/O und 8/B sind leicht zu verwechseln. Prüfe alle Fotos gegeneinander.
+Achtung: Die Nummer steht oft HOCHKANT auf dem Bauteil.
 
 Erfasse außerdem: Markenlogo (Audi-Ringe, VW, Mercedes-Stern ...),
 Materialkennzeichnung, Herkunft ("Germany" o.ä.), Links/Rechts-Hinweise,
@@ -43,41 +48,105 @@ Antworte NUR mit einem JSON-Objekt, ohne Erklärtext:
 }"""
 
 
-def _normalize(result: dict) -> dict:
+class KeineTeilenummer(RuntimeError):
+    """Auf den Fotos war keine Teilenummer zu finden."""
+
+
+def _normalize(result: Dict) -> Dict:
     kompakt = result.get("teilenummer_kompakt") or result.get("teilenummer", "")
-    kompakt = kompakt.replace(" ", "").replace("/", "").replace(".", "").replace("-", "")
-    result["teilenummer_kompakt"] = kompakt
+    for zeichen in " /.-":
+        kompakt = kompakt.replace(zeichen, "")
+    result["teilenummer_kompakt"] = kompakt.upper()
     return result
 
 
-def analyze_photos(photos: List[Path], work_dir: Path) -> dict:
-    """Fotos analysieren. `work_dir` nimmt die aufbereiteten Kopien auf."""
-    if not photos:
-        raise ValueError("Keine Fotos übergeben")
+# --- Kostenlose Variante -----------------------------------------------------
 
-    small = images.prepare_for_vision(photos, work_dir)
-    log.info("Analysiere %d Foto(s) (%d px)", len(small), config.VISION_MAX_EDGE)
-    result = _normalize(llm.ask_json(PROMPT, images=small, model=config.VISION_MODEL))
+def analysiere_lokal(photos: List[Path]) -> Dict:
+    """Fotos mit der macOS-Texterkennung auswerten. Kostet nichts."""
+    texte = ocr.lies_fotos(photos)
+    if not texte:
+        raise KeineTeilenummer(
+            "Die Texterkennung hat auf den Fotos keinen Text gefunden. "
+            "Bitte ein scharfes Foto der eingestanzten Teilenummer ergänzen."
+        )
+
+    kandidaten = partnumber.finde_kandidaten(texte)
+    if not kandidaten:
+        gefunden = ", ".join(repr(t) for t, _ in texte[:8])
+        raise KeineTeilenummer(
+            "Keine Teilenummer im erkannten Text gefunden. Gelesen wurde: %s. "
+            "Bitte ein schärferes Foto der Nummer ergänzen." % gefunden
+        )
+
+    beste = kandidaten[0]
+    log.info("Texterkennung: %d Kandidat(en), bester %s (%s)",
+             len(kandidaten), beste.nummer, beste.hersteller)
+    return {
+        "teilenummer": beste.formatiert,
+        "teilenummer_kompakt": beste.nummer,
+        "hersteller": beste.hersteller,
+        "teil_vermutung": None,
+        "position": None,
+        "material": None,
+        "ursprungsland": None,
+        "unsicherheiten": [],
+        "konfidenz_teilenummer": "hoch" if beste.punkte >= 5 else "mittel",
+        "_kandidaten": kandidaten,
+        "_ocr_text": [t for t, _ in texte],
+    }
+
+
+# --- Variante mit Bildmodell -------------------------------------------------
+
+def analysiere_mit_ki(photos: List[Path], work_dir: Path) -> Dict:
+    """Fotos von einem Bildmodell auswerten (kostenpflichtig bzw. Abo)."""
+    klein = images.prepare_for_vision(photos, work_dir)
+    log.info("Bildmodell: %d Foto(s) bei %d px", len(klein), config.VISION_MAX_EDGE)
+    ergebnis = _normalize(llm.ask_json(PROMPT, images=klein, model=config.VISION_MODEL))
 
     unsicher = (
-        not result.get("teilenummer")
-        or str(result.get("konfidenz_teilenummer", "")).lower() in ("niedrig", "low")
+        not ergebnis.get("teilenummer")
+        or str(ergebnis.get("konfidenz_teilenummer", "")).lower() in ("niedrig", "low")
     )
     if unsicher and config.VISION_MAX_EDGE_RETRY > config.VISION_MAX_EDGE:
         log.info("Teilenummer unsicher — zweiter Durchgang mit %d px",
                  config.VISION_MAX_EDGE_RETRY)
-        big = images.prepare_for_vision(photos, work_dir,
-                                        max_edge=config.VISION_MAX_EDGE_RETRY)
-        retry = _normalize(llm.ask_json(PROMPT, images=big, model=config.VISION_MODEL))
-        if retry.get("teilenummer"):
-            retry.setdefault("unsicherheiten", []).append(
-                "Teilenummer erst im hochauflösenden Durchgang lesbar — bitte prüfen"
-            )
-            result = retry
+        gross = images.prepare_for_vision(photos, work_dir,
+                                          max_edge=config.VISION_MAX_EDGE_RETRY)
+        zweiter = _normalize(llm.ask_json(PROMPT, images=gross,
+                                          model=config.VISION_MODEL))
+        if zweiter.get("teilenummer"):
+            zweiter.setdefault("unsicherheiten", []).append(
+                "Teilenummer erst im hochauflösenden Durchgang lesbar — bitte prüfen")
+            ergebnis = zweiter
 
-    if not result.get("teilenummer"):
-        raise llm.LLMError("Keine Teilenummer erkannt: %s" % result)
-    return result
+    if not ergebnis.get("teilenummer"):
+        raise KeineTeilenummer("Das Bildmodell hat keine Teilenummer erkannt.")
+    return ergebnis
+
+
+def analyze_photos(photos: List[Path], work_dir: Path) -> Dict:
+    """Fotos auswerten — je nach Betriebsart lokal oder mit Bildmodell.
+
+    Fällt die KI aus (kein Guthaben, kein Netz), wird automatisch auf die
+    kostenlose lokale Auswertung zurückgeschaltet, statt abzubrechen.
+    """
+    if not photos:
+        raise ValueError("Keine Fotos übergeben")
+
+    modus = config.aktiver_modus()
+    if modus == "lokal":
+        return analysiere_lokal(photos)
+
+    try:
+        return analysiere_mit_ki(photos, work_dir)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Bildmodell nicht nutzbar (%s) — weiche auf Texterkennung aus", exc)
+        ergebnis = analysiere_lokal(photos)
+        ergebnis.setdefault("unsicherheiten", []).append(
+            "Bildmodell nicht erreichbar (%s) — lokal per Texterkennung gelesen." % exc)
+        return ergebnis
 
 
 def collect_photos(folder: Path) -> List[Path]:
