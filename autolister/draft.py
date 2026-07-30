@@ -112,13 +112,7 @@ def _step(warnings: List[str], name: str, fn, pruefen=None) -> bool:
 
 def _feldwert(page, label: str) -> str:
     """Aktuellen Wert eines Artikelmerkmals auslesen."""
-    feld = _merkmal_feld(page, label)
-    if feld is None:
-        return ""
-    try:
-        return (feld.input_value(timeout=3000) or "").strip()
-    except Exception:
-        return ""
+    return _merkmal_wert(page, label)
 
 
 def _abschnitt_text(page, ueberschrift: str) -> str:
@@ -231,30 +225,130 @@ def _formular_bereit(page, warnings: List[str]) -> bool:
     return True
 
 
-def _merkmal_feld(page, label: str):
-    """Eingabefeld einer Artikelmerkmal-Zeile über seine Beschriftung finden.
+def _merkmal_knopf(page, label: str):
+    """Den sichtbaren Aufklapp-Knopf einer Artikelmerkmal-Zeile finden.
 
-    Alle Merkmalfelder tragen dieselbe Beschriftung ("Suchen oder eigene
-    Angaben machen"), unterscheidbar sind sie nur über den Text links daneben.
-    Der steht nicht in einem <label>, sondern als Knopf mit Tooltip in
-    `div.summary__attributes--label` — das Feld selbst folgt im DOM direkt
-    darauf.
+    Aufbau einer Merkmalzeile (am echten Formular ermittelt):
+
+        div.summary__attributes--section-container
+          button.fake-link.tooltip__host          <- Beschriftung "Hersteller"
+          button.se-expand-button__button          <- SICHTBAR, öffnet das Feld
+            [aria-label="Hersteller"]              <- zeigt später den Wert
+          input.textbox__control                   <- unsichtbar bis geöffnet
+            [aria-label="Suchen oder eigene …"]
+
+    Der frühere Versuch, direkt in das `input` zu schreiben, scheiterte daran,
+    dass es bis zum Öffnen `display:none` hat — Playwright meldete stur
+    "element is not visible".
     """
-    kandidaten = (
+    # Präfix-Vergleich statt exakt: das Feld heißt "OE/OEM Referenznummer(n)",
+    # ein exakter Vergleich auf "OE/OEM Referenznummer" ging daneben.
+    knopf = page.locator(
+        "button.se-expand-button__button[aria-label^='%s']" % label).first
+    if knopf.count():
+        return knopf
+    # Ist bereits ein Wert gesetzt, entfernt eBay das aria-label. Dann bleibt
+    # nur der Weg über die Beschriftung links daneben.
+    knopf = page.locator(
         "xpath=//div[contains(@class,'summary__attributes--label')]"
-        "[normalize-space(.)='%s']/following::input[1]" % label,
-        "xpath=//div[contains(@class,'summary__attributes--label')]"
-        "[starts-with(normalize-space(.),'%s')]/following::input[1]" % label,
-        "xpath=//*[normalize-space(text())='%s']/following::input[1]" % label,
-    )
-    for xpath in kandidaten:
-        feld = page.locator(xpath).first
+        "[starts-with(normalize-space(.),'%s')]/following::button"
+        "[contains(@class,'se-expand-button__button')][1]" % label).first
+    return knopf if knopf.count() else None
+
+
+def _merkmal_setzen(page, label: str, wert: str) -> str:
+    """Ein Artikelmerkmal ausfüllen.
+
+    Der Ablauf ist am echten Formular verifiziert:
+      1. Aufklapp-Knopf klicken — erst dann existiert das Eingabefeld sichtbar
+      2. mit **echten Tastenanschlägen** tippen; ein `fill()` setzt den Wert
+         zwar in das Feld, löst aber die Vorschlagslogik nicht aus und wird
+         beim Schließen verworfen
+      3. Enter — damit übernimmt eBay auch frei eingegebene Werte
+         ("Suchen oder eigene Angaben machen")
+      4. Escape schließt die Auswahl, ohne den Wert zu verwerfen
+    """
+    knopf = _merkmal_knopf(page, label)
+    if knopf is None:
+        raise RuntimeError("Aufklapp-Knopf nicht gefunden")
+    knopf.scroll_into_view_if_needed(timeout=8000)
+    _dialoge_schliessen(page)
+    knopf.click(timeout=8000)
+    page.wait_for_timeout(1500)
+
+    # Das Eingabefeld MUSS aus derselben Zeile stammen. Ein globales `.first`
+    # traf nach dem ersten gesetzten Merkmal weiterhin dessen Feld, weshalb
+    # alle folgenden Merkmale leer blieben.
+    #
+    # Wichtig: auf das Einblenden **warten**, nicht die Sichtbarkeit sofort
+    # abfragen. eBay braucht nach dem Klick einen Moment; eine sofortige
+    # Prüfung meldet "unsichtbar" und schickt uns in die falsche Rückfallebene.
+    # Das Feld liegt im direkten Elternelement des Knopfes (div.fake-menu-button).
+    zeile = knopf.locator("xpath=..")
+    feld = zeile.locator("input.textbox__control").first
+    try:
+        feld.wait_for(state="visible", timeout=8000)
+    except Exception:
+        feld = page.locator("input.textbox__control:visible").first
+        feld.wait_for(state="visible", timeout=6000)
+    feld.click(timeout=6000)
+    feld.press_sequentially(str(wert), delay=110)
+    page.wait_for_timeout(1800)
+
+    # Exakten Vorschlag anklicken, falls einer angeboten wird
+    vorschlag = page.get_by_role("option", name=str(wert), exact=True).first
+    if vorschlag.count() and vorschlag.is_visible():
+        vorschlag.click(timeout=4000)
+    else:
+        feld.press("Enter")
+    page.wait_for_timeout(1800)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(800)
+
+    # Wert zurücklesen — mit Rückfallebenen, weil beides schiefgehen kann:
+    # sobald ein Merkmal gefüllt ist, entfernt eBay dessen aria-label (das
+    # erneute Suchen findet nichts), und beim Pflichtfeld "Hersteller" baut
+    # eBay die Merkmalliste neu auf (der alte Elementzeiger wird ungültig).
+    page.wait_for_timeout(1200)
+    for versuch in range(3):
         try:
-            if feld.count():
-                return feld
+            text = (knopf.inner_text(timeout=3000) or "").strip()
+            if text:
+                return text
         except Exception:
-            continue
-    return None
+            pass
+        # Knopf neu suchen — nach dem Neuaufbau ist der alte Zeiger tot
+        neu = _merkmal_knopf(page, label)
+        if neu is not None:
+            try:
+                text = (neu.inner_text(timeout=3000) or "").strip()
+                if text:
+                    return text
+                knopf = neu
+            except Exception:
+                pass
+        page.wait_for_timeout(900)
+
+    # Letzte Ebene: zeigt irgendein Merkmalknopf diesen Wert an?
+    try:
+        treffer = page.locator("button.se-expand-button__button",
+                               has_text=re.compile(re.escape(str(wert)), re.I))
+        if treffer.count():
+            return str(wert)
+    except Exception:
+        pass
+    return ""
+
+
+def _merkmal_wert(page, label: str) -> str:
+    """Gesetzten Wert eines Merkmals ablesen — steht im Aufklapp-Knopf."""
+    knopf = _merkmal_knopf(page, label)
+    if knopf is None:
+        return ""
+    try:
+        return (knopf.inner_text(timeout=3000) or "").strip()
+    except Exception:
+        return ""
 
 
 def _settle(page, timeout: int = 8000) -> None:
@@ -414,41 +508,22 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
     merkmale = {
         "Hersteller": vision.get("hersteller"),
         "Herstellernummer": vision.get("teilenummer_kompakt"),
-        "OE/OEM Referenznummer": vision.get("teilenummer_kompakt"),
+        "OE/OEM Referenznummer": vision.get("teilenummer_kompakt"),  # heißt real "...(n)"
         "Produktart": listing.get("teilname"),
         # "Einbauposition" steht bewusst nicht hier — siehe
         # config.MERKMALE_AUSLASSEN (Vorgabe des Nutzers). Im Titel bleibt die
         # Position erhalten, nur als Artikelmerkmal wird sie nicht gesetzt.
     }
+    gesetzte_werte: Dict[str, str] = {}
     for label, value in merkmale.items():
         if not value or label in config.MERKMALE_AUSLASSEN:
             continue
 
         def set_specific(label=label, value=value):
-            feld = _merkmal_feld(page, label)
-            if feld is None:
-                raise RuntimeError("Feld nicht gefunden")
-            # Erst in den sichtbaren Bereich holen: eBay hält Felder außerhalb
-            # des Blickfelds inaktiv, ein Klick darauf läuft sonst in einen
-            # Timeout, obwohl das Element im DOM längst existiert.
-            feld.scroll_into_view_if_needed(timeout=8000)
-            _dialoge_schliessen(page)
-            feld.click(timeout=10000)
-            feld.fill(str(value))
-            page.wait_for_timeout(1200)
-            # Vorschlagsliste: exakten Treffer nehmen, sonst eigenen Wert anlegen
-            vorschlag = page.get_by_role("option", name=str(value), exact=True).first
-            if vorschlag.count() and vorschlag.is_visible():
-                vorschlag.click()
-                return
-            eigen = page.get_by_text(re.compile(r"(hinzufügen|verwenden)", re.I)).first
-            if eigen.count() and eigen.is_visible():
-                eigen.click()
-            else:
-                page.keyboard.press("Enter")
+            gesetzte_werte[label] = _merkmal_setzen(page, label, value)
 
         def kontrolle(label=label, value=value):
-            steht = _feldwert(page, label)
+            steht = gesetzte_werte.get(label) or _merkmal_wert(page, label)
             return bool(steht) and str(value)[:6].lower() in steht.lower()
         _step(warnings, "Merkmal '%s'" % label, set_specific, kontrolle)
 
@@ -471,31 +546,52 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
 
     # --- Angebot bewerben: eigener Anzeigentarif 2 % ---
     def promote_2_percent():
-        # Der Schalter "Angebot bewerben" ist bereits an; nur der Tarif steht
-        # auf den voreingestellten 10 %. Über diesen Knopf wird das Prozentfeld
-        # überhaupt erst editierbar.
-        # Abschnitt erst sichtbar machen — er wird verzögert gerendert
-        abschnitt = page.get_by_text(re.compile(r"ANGEBOT BEWERBEN", re.I)).first
-        if abschnitt.count():
-            abschnitt.scroll_into_view_if_needed()
-            page.wait_for_timeout(1500)
-        eigen = page.get_by_text(re.compile(r"Anzeigentarif auswählen", re.I)).first
+        # Reihenfolge ist zwingend: erst den Schalter einschalten, sonst gibt
+        # es weder die Schnellauswahl (8/10/12 %) noch den Knopf für den
+        # eigenen Tarif — der ganze Block wird erst beim Einschalten gebaut.
+        schalter = page.locator(
+            "div.promoted-listing-simple input[role='switch']").first
+        if not schalter.count():
+            raise RuntimeError("Schalter 'Angebot bewerben' nicht gefunden")
+        schalter.scroll_into_view_if_needed(timeout=8000)
+        if not schalter.is_checked():
+            schalter.click(timeout=8000)
+            page.wait_for_timeout(2500)
+
+        # Die Schnellauswahl kennt nur 8/10/12 %. Für 2 % braucht es das
+        # Freitextfeld hinter "Eigenen Anzeigentarif auswählen".
+        eigen = page.locator("button.custom-rate-button-switch").first
         if not eigen.count():
             eigen = page.get_by_role(
-                "button", name=re.compile("Anzeigentarif", re.I)).first
-        eigen.scroll_into_view_if_needed()
-        _dialoge_schliessen(page)
+                "button", name=re.compile("Eigenen Anzeigentarif", re.I)).first
+        eigen.scroll_into_view_if_needed(timeout=8000)
         eigen.click(timeout=8000)
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1800)
+
         feld = page.locator(
             "input[aria-label*='Anzeigentarif' i], input[aria-label*='Prozent' i]").last
         if not feld.count():
-            feld = page.locator("input[inputmode='decimal'], input[type='number']").last
-        feld.fill(config.ANZEIGENTARIF_PROZENT)
+            feld = page.locator(
+                "div.promoted-listing-simple input[type='text']").last
+        feld.click(timeout=6000)
+        feld.fill("")
+        feld.press_sequentially(config.ANZEIGENTARIF_PROZENT, delay=120)
         page.keyboard.press("Tab")
+        page.wait_for_timeout(1500)
 
     def bewerben_kontrolle():
-        text = _abschnitt_text(page, r"ANGEBOT BEWERBEN")
+        # Der eingetragene Tarif steht als Feldwert, nicht als Text im Abschnitt
+        try:
+            feld = page.locator(
+                "input[aria-label*='Anzeigentarif' i], "
+                "div.promoted-listing-simple input[type='text']").last
+            if feld.count():
+                wert = (feld.input_value(timeout=3000) or "").strip().rstrip("%").strip()
+                if wert == config.ANZEIGENTARIF_PROZENT:
+                    return True
+        except Exception:
+            pass
+        text = _abschnitt_text(page, r"Heben Sie Ihre Angebote hervor")
         return config.ANZEIGENTARIF_PROZENT + " %" in text or \
             config.ANZEIGENTARIF_PROZENT + "%" in text
     _step(warnings, "Angebot bewerben (%s%%)" % config.ANZEIGENTARIF_PROZENT,
@@ -503,31 +599,30 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
 
     # --- Rücknahme im Inland aktivieren (Formular startet mit 'Keine Rücknahme') ---
     def enable_returns():
-        # Der Schalter liegt in einem Dialog ("@dialog" in seiner Element-ID),
-        # der über "Bearbeiten" bei "Details zur Lieferung" geöffnet wird.
-        # Den "Bearbeiten"-Knopf über den daneben stehenden Text finden:
-        # "Standort: ... Keine Rücknahme" steht im selben Block.
-        anker = page.get_by_text(re.compile(r"Keine Rücknahme|Rücknahme innerhalb")).first
-        geoeffnet = False
-        if anker.count():
-            anker.scroll_into_view_if_needed(timeout=8000)
-            page.wait_for_timeout(800)
-            knopf = anker.locator(
-                "xpath=ancestor::*[self::div or self::section][5]"
-                "//button[contains(normalize-space(.),'Bearbeiten')]").first
-            if knopf.count():
-                knopf.click(timeout=8000)
-                page.wait_for_timeout(2500)
-                geoeffnet = True
-        if not geoeffnet:
-            raise RuntimeError("Abschnitt 'Details zur Lieferung' nicht gefunden")
+        # "Details zur Lieferung" ist eine anklickbare Karte, kein
+        # Bearbeiten-Knopf: button.se-field-card__body mit dem Text
+        # "Standort: ... Keine Rücknahme". Ein Klick öffnet den Dialog, in dem
+        # die Rücknahme-Einstellungen liegen.
+        karte = page.locator("button.se-field-card__body", has_text="Standort").first
+        if not karte.count():
+            karte = page.locator("button.se-field-card__body",
+                                 has_text=re.compile("Rücknahme")).first
+        if not karte.count():
+            raise RuntimeError("Karte 'Details zur Lieferung' nicht gefunden")
+        karte.scroll_into_view_if_needed(timeout=8000)
+        _dialoge_schliessen(page)
+        karte.click(timeout=8000)
+        page.wait_for_timeout(3000)
 
-        # 1) Inlandsrücknahme einschalten
-        schalter = page.locator("label", has_text=re.compile(r"^\s*Rücknahme im Inland")).first
-        if not schalter.count():
-            schalter = page.get_by_text(re.compile(r"Rücknahme im Inland", re.I)).first
-        schalter.click(timeout=8000)
-        page.wait_for_timeout(1500)
+        # 1) Inlandsrücknahme einschalten (Schalter mit Label im Dialog)
+        beschriftung = page.locator(
+            "label.field__label", has_text=re.compile(r"Rücknahme im Inland")).first
+        if not beschriftung.count():
+            beschriftung = page.get_by_text(
+                re.compile(r"Rücknahme im Inland", re.I)).first
+        beschriftung.scroll_into_view_if_needed(timeout=6000)
+        beschriftung.click(timeout=8000)
+        page.wait_for_timeout(2000)
 
         # 2) Frist auf 14 Tage (Vorgabe des Nutzers)
         frist = "%d Tage" % config.RUECKNAHME_TAGE
@@ -549,39 +644,68 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 kaeufer.click(timeout=5000)
                 page.wait_for_timeout(600)
 
-        fertig = page.get_by_role(
-            "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
+        fertig = page.locator("button.btn--primary", has_text=re.compile(
+            r"^\s*(Fertig|Übernehmen|Speichern|OK)\s*$", re.I)).first
+        if not fertig.count():
+            fertig = page.get_by_role(
+                "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
         if fertig.count() and fertig.is_visible():
             _safe_click(page, fertig, warnings, "Rücknahme übernehmen")
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(2500)
 
     def ruecknahme_kontrolle():
-        text = _abschnitt_text(page, r"Details zur Lieferung")
+        # Die Karte "Details zur Lieferung" zeigt den Stand im Klartext.
+        karte = page.locator("button.se-field-card__body", has_text="Standort").first
+        try:
+            text = karte.inner_text(timeout=4000) if karte.count() else ""
+        except Exception:
+            text = ""
+        if not text:
+            text = _abschnitt_text(page, r"Details zur Lieferung")
         # Solange dort "Keine Rücknahme" steht, hat der Schritt nichts bewirkt
-        return "Keine Rücknahme" not in text and "Rücknahme" in text
+        return bool(text) and "Keine Rücknahme" not in text
     _step(warnings, "Rücknahme aktivieren", enable_returns, ruecknahme_kontrolle)
 
     # --- Versandkosten (DHL-Stufe) ---
     def set_shipping():
-        # Kein freies Preisfeld: eBay bietet Versanddienste als Kacheln an.
-        # Wir öffnen den Dialog und tragen den Preis der gewählten Stufe ein.
-        preis = listing.get("versandpreis")
+        # eBay bietet Versanddienste als Kacheln mit festen Preisen an. Für
+        # einen eigenen Betrag (60 € Spedition) führt der Weg über
+        # "Versandkosten bearbeiten" unter "Wer zahlt?".
+        preis = ("%.2f" % listing.get("versandpreis", 0)).replace(".", ",")
         knopf = page.get_by_role(
             "button", name=re.compile("Versandkosten bearbeiten", re.I)).first
         if not knopf.count():
-            raise RuntimeError("Knopf 'Versandkosten bearbeiten' nicht gefunden")
-        knopf.scroll_into_view_if_needed()
+            knopf = page.get_by_text(
+                re.compile("Versandkosten bearbeiten", re.I)).first
+        if not knopf.count():
+            raise RuntimeError("'Versandkosten bearbeiten' nicht gefunden")
+        knopf.scroll_into_view_if_needed(timeout=8000)
+        _dialoge_schliessen(page)
         knopf.click(timeout=8000)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
+
+        # Im Dialog das erste sichtbare Betragsfeld füllen
         feld = page.locator(
-            "input[aria-label*='Versandkosten' i], input[aria-label*='Kosten' i]").first
+            "input[aria-label*='Versandkosten' i], input[aria-label*='Kosten' i], "
+            "input[aria-label*='Betrag' i]").first
         if not feld.count():
-            raise RuntimeError("Preisfeld im Versanddialog nicht gefunden")
-        feld.fill(("%.2f" % preis).replace(".", ","))
-        fertig = page.get_by_role(
-            "button", name=re.compile(r"(Fertig|Übernehmen|Speichern|OK)", re.I)).first
+            feld = page.locator("[role='dialog'] input[type='text']").first
+        if not feld.count():
+            raise RuntimeError("Betragsfeld im Versanddialog nicht gefunden")
+        feld.click(timeout=6000)
+        feld.fill("")
+        feld.press_sequentially(preis, delay=110)
+        page.wait_for_timeout(1000)
+
+        fertig = page.locator("button.btn--primary", has_text=re.compile(
+            r"^\s*(Fertig|Übernehmen|Speichern|OK)\s*$", re.I)).first
+        if not fertig.count():
+            fertig = page.get_by_role(
+                "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
         if fertig.count() and fertig.is_visible():
             _safe_click(page, fertig, warnings, "Versanddialog schließen")
+            page.wait_for_timeout(2500)
+
     def versand_kontrolle():
         erwartet = ("%.2f" % listing.get("versandpreis", 0)).replace(".", ",")
         return erwartet in _abschnitt_text(page, r"Wer zahlt")
