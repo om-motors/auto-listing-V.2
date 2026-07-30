@@ -111,18 +111,59 @@ hinweisen.
 
 ## Erkenntnisse zum eBay-Verkaufsformular
 
-- Einstieg: `ebay.de/sl/prelist/suggest` → Titel eingeben → „Weiter" → das
-  Formular legt sofort einen Entwurf an (`draftId` in der URL).
-- Die vorgeschlagene **Kategorie ist oft falsch** — prüfen und über
-  „Bearbeiten" per Suche korrigieren.
-- Artikelmerkmale sind Such-Dropdowns; fehlende Werte über „Eigenen Wert
-  hinzufügen" anlegen.
-- Speichern über **„Speichern"** ganz unten — *nicht* „Artikel kostenlos
-  einstellen", das würde veröffentlichen. Danach landet man in
-  `ebay.de/sh/lst/drafts`.
+Alle Selektoren am echten Formular ermittelt und per Trockenlauf verifiziert.
+
+**Einstieg und Grundsätzliches**
+
+- `ebay.de/sl/prelist/suggest` → Titel eingeben → „Weiter" → das Formular
+  legt sofort einen Entwurf an (`draftId` in der URL).
+- Über einem **frisch angelegten** Entwurf liegt ein modaler Dialog
+  („Zum erweiterten Verkaufsformular wechseln"), der jeden Klick blockiert.
+  Bei einem *nachgeladenen* Entwurf erscheint er nicht — deshalb war er bei
+  der Selektor-Untersuchung unsichtbar und ließ alle Schritte in Timeouts
+  laufen. `_dialoge_schliessen()` klickt „Nein, bleiben".
+- eBay rendert das lange Formular **abschnittsweise nach**. Ohne
+  `_formular_bereit()` (auf Anker warten + einmal durchscrollen) fehlt die
+  halbe Seite.
+- Speichern über **„Speichern"** ganz unten. Die Veröffentlichen-Knöpfe
+  heißen „Zu genannten Gebühren einstellen" bzw. „Artikel kostenlos
+  einstellen" — beide fängt `FORBIDDEN` ab.
 - **Foto-Upload:** direkt per `set_input_files()` in das `input[type=file]`.
-  Der frühere Umweg über einen lokalen CORS-Server war nur wegen der
-  Chrome-Erweiterung nötig und ist entfallen.
+
+**Artikelmerkmale — die vier Fallen**
+
+Aufbau einer Zeile: Beschriftung, sichtbarer Aufklapp-Knopf
+`button.se-expand-button__button[aria-label="<Name>"]`, und ein
+`input.textbox__control`, das bis zum Aufklappen `display:none` hat.
+
+1. Direkt ins `input` schreiben geht nicht („element is not visible") —
+   erst den Aufklapp-Knopf klicken.
+2. `fill()` setzt den Wert, löst aber die Übernahme nicht aus; er
+   verschwindet beim Schließen. Es braucht `press_sequentially()` und Enter.
+3. Das Feld liegt im **direkten Elternelement** des Knopfes
+   (`div.fake-menu-button`). Ein globales `.first` traf nach dem ersten
+   gesetzten Merkmal weiterhin dessen Feld — alle folgenden blieben leer.
+4. Das Feld heißt real `OE/OEM Referenznummer(n)`; exakter Vergleich schlägt
+   fehl, Präfix-Vergleich nötig. Und sobald ein Merkmal gefüllt ist,
+   **entfernt eBay dessen `aria-label`** — das Zurücklesen braucht deshalb
+   Rückfallebenen.
+
+**Anzeigentarif, Rücknahme, Versand**
+
+- Anzeigentarif: erst `div.promoted-listing-simple input[role=switch]`
+  einschalten, sonst existiert der Block nicht. Die Schnellauswahl kennt nur
+  8/10/12 % — für 2 % führt der Weg über `button.custom-rate-button-switch`.
+- Rücknahme und Versand sitzen hinter **Karten**, nicht hinter
+  Bearbeiten-Knöpfen: `button.se-field-card__body`. Im Dialog dann
+  `label.field__label` „Rücknahme im Inland" und „Fertig".
+
+## Warum jeder Schritt sein Ergebnis kontrolliert
+
+`_step()` nimmt eine Kontrollfunktion. Ohne sie galt ein Schritt als
+erfolgreich, sobald keine Ausnahme flog — im Echtlauf trugen drei Schritte
+gar nichts ein, während der Bericht meldete, es sei nichts mehr von Hand zu
+tun. **Ein Bericht, der lügt, ist schädlicher als einer, der Arbeit
+auflistet.** Neue Formularschritte deshalb immer mit Kontrolle versehen.
 
 ## Wenn eBay das Formular umbaut
 
