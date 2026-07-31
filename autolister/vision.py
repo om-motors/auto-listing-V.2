@@ -62,18 +62,34 @@ def _normalize(result: Dict) -> Dict:
 
 # --- Kostenlose Variante -----------------------------------------------------
 
-def analysiere_lokal(photos: List[Path]) -> Dict:
-    """Fotos mit der macOS-Texterkennung auswerten. Kostet nichts."""
-    texte = ocr.lies_fotos(photos)
+def analysiere_lokal(photos: List[Path], vorgabe: str = "") -> Dict:
+    """Fotos mit der macOS-Texterkennung auswerten. Kostet nichts.
+
+    Es wird immer gründlich gelesen (Original **und** kontrastverstärkte
+    Fassung). Ein früherer Versuch, die Verstärkung nur bei Misserfolg
+    nachzuschieben, ging schief: der schnelle Durchgang lieferte an einem
+    Audi-Träger *falsche* Kandidaten (5K0807032 statt 8K0807832A) und wurde
+    deshalb nie eskaliert. Die zusätzliche Sekunde ist billiger als eine
+    falsche Teilenummer im Inserat.
+    """
+    texte = ocr.lies_fotos(photos, gruendlich=True)
+    kandidaten = partnumber.finde_kandidaten(texte) if texte else []
+
+    # Vom Nutzer vorgegebene Nummer (Ordnername) schlägt jede Lesart
+    vorgegeben = partnumber.aus_vorgabe(vorgabe)
+    if vorgegeben:
+        log.info("Teilenummer aus Vorgabe übernommen: %s", vorgegeben.nummer)
+        kandidaten = [vorgegeben] + [k for k in kandidaten
+                                     if k.nummer != vorgegeben.nummer]
+        texte = texte or [(vorgegeben.formatiert, 1.0)]
+
     if not texte:
         raise KeineTeilenummer(
             "Die Texterkennung hat auf den Fotos keinen Text gefunden. "
             "Bitte ein scharfes Foto der eingestanzten Teilenummer ergänzen."
         )
-
-    kandidaten = partnumber.finde_kandidaten(texte)
     if not kandidaten:
-        gefunden = ", ".join(repr(t) for t, _ in texte[:8])
+        gefunden = ", ".join(repr(t) for t, _ in texte[:10])
         raise KeineTeilenummer(
             "Keine Teilenummer im erkannten Text gefunden. Gelesen wurde: %s. "
             "Bitte ein schärferes Foto der Nummer ergänzen." % gefunden
@@ -126,7 +142,7 @@ def analysiere_mit_ki(photos: List[Path], work_dir: Path) -> Dict:
     return ergebnis
 
 
-def analyze_photos(photos: List[Path], work_dir: Path) -> Dict:
+def analyze_photos(photos: List[Path], work_dir: Path, vorgabe: str = "") -> Dict:
     """Fotos auswerten — je nach Betriebsart lokal oder mit Bildmodell.
 
     Fällt die KI aus (kein Guthaben, kein Netz), wird automatisch auf die
@@ -137,13 +153,13 @@ def analyze_photos(photos: List[Path], work_dir: Path) -> Dict:
 
     modus = config.aktiver_modus()
     if modus == "lokal":
-        return analysiere_lokal(photos)
+        return analysiere_lokal(photos, vorgabe)
 
     try:
         return analysiere_mit_ki(photos, work_dir)
     except Exception as exc:  # noqa: BLE001
         log.warning("Bildmodell nicht nutzbar (%s) — weiche auf Texterkennung aus", exc)
-        ergebnis = analysiere_lokal(photos)
+        ergebnis = analysiere_lokal(photos, vorgabe)
         ergebnis.setdefault("unsicherheiten", []).append(
             "Bildmodell nicht erreichbar (%s) — lokal per Texterkennung gelesen." % exc)
         return ergebnis

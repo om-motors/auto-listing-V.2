@@ -38,8 +38,17 @@ STOPPWOERTER = {
     "geöffnet", "geoeffnet", "fenster", "tab", "wird", "neuem", "angebot",
 }
 
-# Baureihenkürzel: W205, S205, X253, 8T0, B8, F30, 4F, 3C ...
-MODELLCODE = re.compile(r"\b(?:[A-Z]{1,2}\d{2,3}[A-Z]?|\d[A-Z]\d)\b")
+# Baureihenkürzel: W205, S205, X253, 8T0, B8, F30, A5, Q7 ...
+# Kurze Kürzel wie "A5" oder "B8" gehören dazu — ohne sie blieb der Titel
+# eines Audi-Teils ohne jede Modellangabe.
+MODELLCODE = re.compile(r"\b(?:[A-Z]{1,2}\d{2,3}[A-Z]?|\d[A-Z]\d|[A-Z]\d)\b")
+
+# Markennamen, wie sie in eBay-Titeln stehen
+MARKEN = {
+    "MERCEDES": "Mercedes-Benz", "BENZ": "Mercedes-Benz", "AUDI": "Audi",
+    "VOLKSWAGEN": "VW", "VW": "VW", "BMW": "BMW", "PORSCHE": "Porsche",
+    "SKODA": "Skoda", "SEAT": "Seat", "OPEL": "Opel", "FORD": "Ford",
+}
 
 # Einbaupositionen, wie sie in Titeln vorkommen
 POSITIONEN = [
@@ -60,9 +69,17 @@ VERSAND_STICHWOERTER = [
                    "motor", "getriebe", "differential", "differenzial",
                    "hinterachs", "vorderachs", "achse", "fahrwerk", "klappe",
                    "heckklappe", "dach", "rahmen", "träger komplett")),
-    ("Groß", ("stoßstange", "stossstange", "stoßfänger", "stossfaenger",
-              "türverkleidung", "tuerverkleidung", "verkleidung komplett",
-              "armaturenbrett", "kühlerpaket", "kuehlerpaket", "tank")),
+    # Früher eine eigene Stufe "Groß" zu 79,90 € — laut Nutzervorgabe geht
+    # alles Sperrige per Spedition zu 60 €, deshalb hier zusammengelegt.
+    ("Spedition", ("stoßstange", "stossstange", "stoßfänger", "stossfaenger",
+                   "türverkleidung", "tuerverkleidung", "verkleidung komplett",
+                   "armaturenbrett", "kühlerpaket", "kuehlerpaket", "tank",
+                   # Querträger/Aufprallträger sind gut einen Meter lang — die
+                   # gingen anfangs als "Standard" durch, weil nur "halter" traf
+                   "querträger", "quertraeger", "aufprallträger", "aufpralltraeger",
+                   "prallträger", "pralltraeger", "stoßstangenträger",
+                   "stossstangentraeger", "träger", "traeger", "schweller",
+                   "auspuff", "endschalldämpfer", "endschalldaempfer")),
     ("Mittel", ("scheinwerfer", "spiegel", "rücklicht", "ruecklicht",
                 "verkleidung", "grill", "kühler", "kuehler", "lüfter",
                 "luefter", "airbag", "display", "steuergerät", "steuergeraet",
@@ -82,15 +99,28 @@ def vergleichbare_angebote(angebote: List[Dict], teilenummer: str) -> List[int]:
 
     Das ist der verlässlichste Filter, den es ohne KI gibt: Wer die Nummer
     hinschreibt, verkauft mit hoher Wahrscheinlichkeit genau dieses Teil.
+
+    Wenige Treffer sind ein ehrliches Ergebnis, kein Grund zum Aufweichen.
+    Eine frühere Fassung nahm bei unter drei Treffern *alle* Suchergebnisse —
+    für einen Audi-Querträger (129 €) landeten so komplette Stoßstangen zu
+    1450 € in der Preisbasis. Lieber ein dünner, richtiger Vergleich als ein
+    breiter, falscher.
     """
-    nummer = teilenummer.lower().replace(" ", "")
-    passend = [
-        i for i, a in enumerate(angebote)
-        if nummer in a["titel"].lower().replace(" ", "").replace("-", "")
-    ]
-    # Führt kaum ein Angebot die Nummer, ist der Filter zu streng — dann
-    # lieber alle nehmen und über die Ausreißerkappung im Preis abfedern.
-    return passend if len(passend) >= 3 else list(range(len(angebote)))
+    import re as _re
+
+    def normiert(text: str) -> str:
+        return _re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+    nummer = normiert(teilenummer)
+    ohne_suffix = _re.match(r"^(.*\d)[a-z]{1,2}$", nummer)
+    kurz = ohne_suffix.group(1) if ohne_suffix else None
+
+    passend = []
+    for i, a in enumerate(angebote):
+        titel = normiert(a.get("titel", ""))
+        if (nummer and nummer in titel) or (kurz and kurz in titel):
+            passend.append(i)
+    return passend
 
 
 def teilname(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
@@ -116,6 +146,22 @@ def teilname(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
     return beste.capitalize()
 
 
+def hersteller(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
+    """Marke aus den Vergleichstiteln ableiten.
+
+    Nötig, weil auf vielen Teilen nur das Logo steht und kein Markenname —
+    die Audi-Ringe liest keine Texterkennung als "Audi". In den eBay-Titeln
+    steht die Marke dagegen praktisch immer.
+    """
+    zaehler: Counter = Counter()
+    for i in indizes:
+        gross = angebote[i]["titel"].upper()
+        for wort, name in MARKEN.items():
+            if re.search(r"\b%s\b" % wort, gross):
+                zaehler[name] += 1
+    return zaehler.most_common(1)[0][0] if zaehler else None
+
+
 def modellcodes(angebote: List[Dict], indizes: List[int], maximal: int = 3) -> str:
     """Häufigste Baureihenkürzel aus den Vergleichstiteln."""
     zaehler: Counter = Counter()
@@ -126,7 +172,10 @@ def modellcodes(angebote: List[Dict], indizes: List[int], maximal: int = 3) -> s
             if code.isdigit():
                 continue
             zaehler[code] += 1
-    haeufig = [c for c, n in zaehler.most_common(maximal * 2) if n >= 2]
+    # Bei wenigen Vergleichsangeboten kann nichts zweimal vorkommen — dann
+    # genügt ein Fund, sonst bliebe der Titel ganz ohne Modellangabe.
+    schwelle = 2 if len(indizes) >= 3 else 1
+    haeufig = [c for c, n in zaehler.most_common(maximal * 2) if n >= schwelle]
     return " ".join(haeufig[:maximal])
 
 

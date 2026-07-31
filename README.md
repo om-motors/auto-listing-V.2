@@ -99,10 +99,17 @@ Fotos auswählen, hochladen, fertig. Ein Upload = ein Teil.
    echte Nummer bringt Treffer, ein Lesefehler nicht
 4. **Preis ermitteln** — Median der Vergleichsangebote mit derselben Nummer,
    Ausreißer über den Quartilsabstand entfernt
-5. **Entwurf anlegen** — Titel, Beschreibung, Merkmale, Versandstufe,
-   Rücknahme, Preisvorschläge, Anzeigentarif 2 %
+5. **Entwurf ausfüllen** — Fotos, Titel, Zustand „Gebraucht", Beschreibung,
+   Artikelmerkmale (Hersteller, Herstellernummer, OE/OEM, Produktart),
+   Preis, Preisvorschläge, Anzeigentarif 2 %, Rücknahme 14 Tage Inland mit
+   Rückversand zulasten des Käufers, Versandstufe
 6. **Speichern** — erscheint auch in der eBay-App unter „Entwürfe"
 7. **Bescheid geben** — Mac-Mitteilung plus Bericht in `Berichte/`
+
+Jeder Schritt **kontrolliert sein Ergebnis nach**. Was nicht sicher gesetzt
+werden konnte, steht als abhakbare Liste im Bericht — mit dem fertigen Wert
+zum Übertragen. Der Bericht behauptet also nie, etwas sei erledigt, das es
+nicht ist.
 
 Die Fotos wandern anschließend nach `Erledigt/<Teilenummer>/`.
 
@@ -205,5 +212,10 @@ von macOS (siehe oben). `.venv/bin/python -m autolister.doctor` sagt es dir.
 **„Nicht bei eBay eingeloggt" / Sicherheitsabfrage** —
 `.venv/bin/python -m autolister.login` ausführen.
 
-**Viele Punkte unter „Bitte prüfen"** — eBay hat vermutlich das Formular
-umgebaut. Einmal mit `--trockenlauf` bei sichtbarem Browser nachschauen.
+**Viele Punkte unter „Im eBay-Entwurf noch von Hand setzen"** — eBay hat
+vermutlich das Formular umgebaut. Einmal mit `--trockenlauf` bei sichtbarem
+Browser nachschauen; der Screenshot im Bericht zeigt, wie weit es kam.
+
+**Ein Teil, das die Automation nicht lesen kann** — den Ordner einfach nach
+der Teilenummer benennen (`Eingang/8K0807832A/`) oder die Nummer beim Upload
+ins Namensfeld schreiben. Dann wird sie ohne Raten verwendet.

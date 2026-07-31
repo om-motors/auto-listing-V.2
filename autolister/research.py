@@ -95,6 +95,21 @@ def _suche(page, query: str, verkauft: bool = False) -> List[Dict]:
     return _extract_items(page)
 
 
+def _nummer_im_titel(nummer: str, titel: str) -> bool:
+    """Steht die Teilenummer wirklich im Titel?
+
+    Verglichen wird ohne Leer- und Trennzeichen, damit "8K0 807 832 A" und
+    "8K0807832A" als gleich gelten. Zusätzlich zählt die Nummer ohne
+    Nachsatzbuchstaben, weil Verkäufer den oft weglassen.
+    """
+    sauber = re.sub(r"[^A-Z0-9]", "", titel.upper())
+    nummer = re.sub(r"[^A-Z0-9]", "", nummer.upper())
+    if nummer and nummer in sauber:
+        return True
+    ohne_suffix = re.match(r"^(.*\d)[A-Z]{1,2}$", nummer)
+    return bool(ohne_suffix and ohne_suffix.group(1) in sauber)
+
+
 def _mit_verkauften_ergaenzen(page, query: str, ergebnis: Dict) -> Dict:
     """Tatsächlich erzielte Verkaufspreise nachladen.
 
@@ -136,22 +151,28 @@ def pruefe_kandidaten(page, kandidaten) -> Dict:
 
     Rückgabe: {kandidat, query, angebote, geprueft}
     """
-    for kandidat in kandidaten[:4]:
+    gesucht = set()
+    for kandidat in kandidaten[:config.KANDIDATEN_PRUEFEN]:
         for query in _query_variants(kandidat.formatiert, kandidat.nummer):
+            if query in gesucht or len(gesucht) >= config.SUCHEN_MAXIMAL:
+                continue          # dieselbe Suche nicht zweimal, und nicht endlos
+            gesucht.add(query)
             items = _suche(page, query)
-            # Nur Treffer zählen, die die Nummer wirklich im Titel führen
+            # Nur Treffer zählen, die die Nummer wirklich im Titel führen.
+            # Ohne diese Prüfung gilt jede Suche als Erfolg — eBay liefert
+            # immer irgendetwas zurück, im Zweifel iMacs zu "5K0807032".
             passend = [
                 i for i in items
-                if kandidat.nummer.lower() in i["titel"].lower().replace(" ", "")
+                if _nummer_im_titel(kandidat.nummer, i["titel"])
             ]
-            if len(passend) >= 2:
+            # EIN Treffer genügt. Dass eine 9- bis 11-stellige Teilenummer
+            # zufällig in einem fremden Titel steht, ist praktisch
+            # ausgeschlossen. Zwei zu verlangen ließ ein real existierendes
+            # Audi-Teil durchfallen, das nur einmal angeboten war.
+            if passend:
                 return _mit_verkauften_ergaenzen(page, query, {
                     "kandidat": kandidat, "query": query,
-                    "angebote": items[:25], "geprueft": True})
-    # Kein Kandidat ließ sich bestätigen — mit dem bestbewerteten weitermachen
-    if kandidaten:
-        beste = kandidaten[0]
-        ergebnis = search_comparables(page, beste.formatiert, beste.nummer)
-        ergebnis.update({"kandidat": beste, "geprueft": False})
-        return ergebnis
-    return {"kandidat": None, "query": "", "angebote": [], "geprueft": False}
+                    "angebote": items[:25], "treffer_mit_nummer": len(passend),
+                    "geprueft": True})
+    return {"kandidat": kandidaten[0] if kandidaten else None,
+            "query": "", "angebote": [], "verkaufte": [], "geprueft": False}

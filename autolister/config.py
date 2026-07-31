@@ -58,6 +58,14 @@ MODUS = os.environ.get("AUTOLISTER_MODUS", "lokal").strip().lower()
 # 4032 px kam die vollständige Nummer, bei 3000 px nur noch bruchstückhaft.
 OCR_MAX_EDGE = int(os.environ.get("AUTOLISTER_OCR_MAX_EDGE", "4200"))
 
+# Wie viele Lesarten der Teilenummer auf eBay gegengeprüft werden. Jede
+# Prüfung ist ein Seitenaufruf (~2 s), deshalb begrenzt.
+KANDIDATEN_PRUEFEN = int(os.environ.get("AUTOLISTER_KANDIDATEN_PRUEFEN", "6"))
+
+# Obergrenze für eBay-Suchen je Produkt, damit ein aussichtsloser Fall nicht
+# minutenlang läuft.
+SUCHEN_MAXIMAL = int(os.environ.get("AUTOLISTER_SUCHEN_MAXIMAL", "8"))
+
 # Browser sichtbar laufen lassen (empfohlen: eBay blockt Headless eher)
 HEADLESS = os.environ.get("AUTOLISTER_HEADLESS", "0") == "1"
 
@@ -69,13 +77,22 @@ SETTLE_SECONDS = int(os.environ.get("AUTOLISTER_SETTLE_SECONDS", "25"))
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
 
-# DHL-Versandstufen (Käufer zahlt)
+# Versandstufen (Käufer zahlt). Vorgabe des Nutzers vom 2026-07-30:
+# alles Große geht per Spedition und kostet 60 € — die frühere Stufe "Groß"
+# zu 79,90 € gibt es nicht mehr, sie ist in "Spedition" aufgegangen.
 VERSAND_STUFEN = [
     ("Standard", 7.69, "Halter, Sensoren, Kleinteile, Zierleisten"),
     ("Mittel", 23.99, "Scheinwerfer, Spiegel, größere Verkleidungen"),
-    ("Groß", 79.90, "Stoßstangen, Türverkleidungen"),
-    ("Spedition", 99.90, "Türen, Hauben, Kotflügel, Sitze"),
+    ("Spedition", 60.00, "Stoßstangen, Träger, Türen, Hauben, Kotflügel, Sitze"),
 ]
+
+# Feste Vorgaben des Nutzers, die in jedem Inserat gleich sind
+ANZEIGENTARIF_PROZENT = os.environ.get("AUTOLISTER_ANZEIGENTARIF", "2")
+RUECKNAHME_TAGE = int(os.environ.get("AUTOLISTER_RUECKNAHME_TAGE", "14"))
+RUECKVERSAND_ZAHLT_KAEUFER = True
+
+# Artikelmerkmale, die bewusst NICHT gesetzt werden (Vorgabe des Nutzers)
+MERKMALE_AUSLASSEN = {"Einbauposition"}
 
 
 def aktiver_modus() -> str:

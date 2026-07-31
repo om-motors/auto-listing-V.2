@@ -121,6 +121,13 @@ def _lokal(vision_result: Dict, research_result: Dict) -> Dict:
     indizes = ableiten.vergleichbare_angebote(angebote, nummer)
     teil = ableiten.teilname(angebote, indizes) or vision_result.get("teil_vermutung")
     codes = ableiten.modellcodes(angebote, indizes)
+    # Steht auf dem Teil nur das Logo, kennt die Texterkennung die Marke nicht.
+    # Die Vergleichstitel nennen sie fast immer.
+    if not hersteller or hersteller in ("Audi/VW",):
+        hersteller = ableiten.hersteller(angebote, indizes) or hersteller
+        # zurückschreiben, damit Beschreibung und Bericht dieselbe Marke nennen
+        if hersteller:
+            vision_result["hersteller"] = hersteller
     pos = vision_result.get("position") or ableiten.position(angebote, indizes)
     stufe = ableiten.versandstufe(teil, " ".join(
         angebote[i]["titel"] for i in indizes[:5]))
@@ -130,8 +137,13 @@ def _lokal(vision_result: Dict, research_result: Dict) -> Dict:
     if not research_result.get("geprueft", True):
         hinweise.append("Teilenummer konnte auf eBay nicht bestätigt werden — "
                         "bitte besonders sorgfältig prüfen!")
-    if len(indizes) < 3:
-        hinweise.append("Nur wenige Vergleichsangebote gefunden — Preis prüfen.")
+    if len(indizes) == 1:
+        hinweise.append("ACHTUNG: Nur EIN Angebot mit dieser Teilenummer "
+                        "gefunden. Der Preis beruht damit auf einem einzigen "
+                        "Verkäufer — unbedingt selbst einschätzen.")
+    elif len(indizes) < 4:
+        hinweise.append("Nur %d Vergleichsangebote — Preis ist wenig "
+                        "abgesichert, bitte prüfen." % len(indizes))
 
     quelle = _preisquelle(research_result, nummer)
     hinweise.append("Preis aus %d %s." % (len(quelle["indizes"]), quelle["quelle"]))
