@@ -9,6 +9,13 @@ braucht Claude nicht. Siehe [README.md](README.md) für die Bedienung.
 
 Claude arbeitet hier also **am Code**, nicht an einzelnen Inseraten.
 
+## Zuerst lesen: [ARBEITSSTAND.md](ARBEITSSTAND.md)
+
+Dort steht, wo die Arbeit gerade steht, welche Befunde offen sind und was als
+Nächstes ansteht — das überlebt ein `/clear`, der Gesprächsverlauf nicht.
+**Am Ende einer Sitzung, in der sich der Stand geändert hat, dort nachtragen.**
+Dauerhaftes Projektwissen gehört weiterhin hierher, nicht in den Arbeitsstand.
+
 ## Aufbau
 
 | Modul | Aufgabe |
