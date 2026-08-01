@@ -8,18 +8,62 @@ Hier steht deshalb, **wo die Arbeit gerade steht und was als Nächstes ansteht**
 der Stand geändert hat — erledigte Punkte streichen, neue Erkenntnisse eintragen.
 Dauerhaftes Wissen über das Projekt gehört dagegen nach `CLAUDE.md`, nicht hierher.
 
-Letzte Aktualisierung: 2026-08-01
+Letzte Aktualisierung: 2026-08-01 (nach dem ersten Echtlauf)
 
 ---
 
 ## Aktueller Stand
 
-- Branch: `feature/eigenstaendige-pipeline`, Basis-Commit `d5d161b`
-- Arbeitsbaum sauber, `main` liegt 4 Commits zurück (bewusst, noch kein Merge)
-- Die Pipeline ist vollständig, lief aber **noch nie im Echtlauf gegen das
-  eBay-Verkaufsformular**. Alle Selektoren in `draft.py` stammen aus einer
-  Untersuchung am Formular plus Trockenläufen — nicht aus einem
-  Durchlauf, der einen Entwurf gespeichert hat.
+- Alles auf `main` (`f8cf98a`), lokal und auf GitHub gleichstand
+- **Der erste Echtlauf gegen das echte eBay-Formular ist gelaufen und war
+  erfolgreich.** Details unten. Die Selektoren in `draft.py` sind damit erstmals
+  live bestätigt — für genau eine Formularvariante an genau einem Tag.
+
+---
+
+## Ergebnis des ersten Echtlaufs (2026-08-01, 15:35–15:40)
+
+Testteil: Audi Sonnenblende `8K0 857 552`, 3 Fotos, Ordner `Eingang/Test 1`,
+Betriebsart `lokal`. Entwurf: `draftId=5184972239823`.
+
+**Nichts wurde veröffentlicht.** Nachgeprüft an `ebay.de/sh/lst/active`:
+„Sie haben anscheinend keine aktiven Angebote." Der Entwurf steht in der
+Entwurfsliste, `draftId` steht weiterhin in der URL.
+
+Alle Feldwerte am Entwurf zurückgelesen (rein lesend, ohne Klicks):
+
+| Vorgabe | Feld | Wert | |
+|---|---|---|---|
+| Titel | `title` | Original Audi A4 B8 A5 Sonnenblende vorne rechts 8K0857552 | ✅ |
+| Sofort-Kaufen | `format` | `FixedPrice` | ⚠️ eBay-Vorgabe, nicht gesetzt |
+| Preis | `Artikelpreis` | `29,90` | ✅ |
+| Preisvorschläge | `bestOfferEnabled` | `true` | ✅ |
+| Rücknahme | `returnPolicy` | `true` | ✅ |
+| Frist 14 Tage | `returnDuration` | `Days_14` | ✅ |
+| Käufer zahlt Rückversand | `returnShippingPayer` | `Buyer` | ✅ |
+| Anzeigentarif 2 % | `promotedListingSelection` + `customAdRateField` | `true` / `2` | ✅ |
+| Keine Auslandsrücknahme | Internationaler Versand | aus | ⚠️ eBay-Vorgabe, nicht gesetzt |
+| Zustand Gebraucht | — | „Gebraucht" | ✅ |
+| Merkmale | Hersteller / Produktart / Herstellernummer / OE-Referenz | Audi / Sonnenblende / 8K0857552 / 8K0857552 | ✅ |
+| Einbauposition weglassen | — | leer | ✅ |
+| Versandkosten | Wer zahlt | Käufer, 23,99 € | ❌ falsche Stufe, siehe F1 |
+
+**Was das über die Prüfbefunde sagt:** Die Befunde A1, A2, A5, B2, B3, B4, B5,
+C1, C2 haben in diesem Lauf **nicht ausgelöst**. Das entkräftet sie nicht — der
+Speichern-Hauptweg wurde genommen, der `.last`-Fallback (A5) kam nie zum Zug, und
+kein unbekannter Dialog tauchte auf, der die Blindklick-Schleife (A1) hätte
+gefährlich werden lassen. Ein Lauf, in dem eine Sperre nicht herausgefordert
+wurde, sagt nichts über die Sperre aus.
+
+**Zwei Vorgaben stimmen nur zufällig:** `format=FixedPrice` und der
+ausgeschaltete internationale Versand sind eBays Voreinstellungen, nicht das
+Werk der Pipeline (D1, D2 stehen unverändert). eBay merkt sich zuletzt genutzte
+Verkaufseinstellungen — nach einer einzigen manuell angelegten Auktion kippt das.
+
+**Der Bericht enthielt keine einzige Warnung.** Bei sieben kontrollfreien
+Schritten (B1) ist das erwartbar und kein Qualitätsnachweis: die falsche
+Versandstufe F1 stand ungewarnt im Bericht, und `versand_kontrolle` hat sie
+bestätigt, weil sie gegen denselben falschen Wert prüft.
 
 ---
 
@@ -265,6 +309,14 @@ Overlay auf derselben URL erscheint — führt zu Timeout-Kaskaden und am Ende z
 „Speichern-Button nicht gefunden". Der Nutzer bekommt eine Fehlermeldung, die eine
 kaputte Selektorlage nahelegt, statt der Anleitung `python -m autolister.login`.
 
+**E4 ✅ Zwei Hinweisfenster wurden nicht geschlossen — `draft.py:170`**
+Im Echtlauf meldete `_dialoge_schliessen` „0 Hinweisfenster geschlossen", und auf
+dem Screenshot stehen zwei offene Tipp-Fenster: „Artikelkategorie überprüfen" und
+„Wählen Sie ein Angebotsformat aus" — letzteres verdeckte das Preisfeld
+vollständig. Die Schließen-Selektoren treffen diese Fenster also nicht. Harmlos
+in diesem Lauf, aber es heißt: die Funktion tut nicht, was sie behauptet, und es
+ist dieselbe Funktion, die Risiko A1 trägt.
+
 **E3 ❓ „Entwurf gespeichert" auch bei komplettem Fehlschlag — `pipeline.py:122`**
 `_finish` verschiebt die Fotos aus dem Eingang und meldet unbedingt Erfolg mit
 Titel und Preis, unabhängig davon, wie viele Schritte in `warnings` gelandet sind.
@@ -274,6 +326,40 @@ keine Adresse, und der Watcher legt beim nächsten Lauf einen zweiten Entwurf f�
 dasselbe Teil an.
 *Behebung:* Zahl der offenen Punkte in die Mitteilung übernehmen, `draft_url` im
 `DraftError` mitführen.
+
+---
+
+### F — Im Echtlauf neu gefunden
+
+**F1 ✅ Fremde Angebotstitel kippen die Versandstufe — `ableiten.py:191`**
+Die Sonnenblende bekam **Mittel (23,99 €)** statt **Standard (7,69 €)** — 16,30 €
+zu viel auf einen Artikel für 29,90 €. Ursache:
+
+```python
+text = ((teil or "") + " " + zusatztext).lower()
+for stufe, stichwoerter in VERSAND_STICHWOERTER:
+    if any(s in text for s in stichwoerter):
+        return stufe
+```
+
+`zusatztext` sind die Titel der fünf ersten Vergleichsangebote
+(`compose.py:132`). Die Stufenliste ist von groß nach klein geordnet und das
+**erste** Stichwort gewinnt — ein einzelnes „Spiegel" oder „Verkleidung" in einem
+fremden Titel schlägt also den echten Teilnamen, der nur über „blende" in
+„Standard" fällt. Nachgestellt:
+
+```
+versandstufe('Sonnenblende', '')                                -> Standard
+versandstufe('Sonnenblende', 'Sonnenblende Spiegel Panel')      -> Mittel
+versandstufe('Sonnenblende', 'Sonnenblende Verkleidung grau')   -> Mittel
+```
+
+Der Docstring sagt „im Zweifel die kleinste" — die Umsetzung tut das Gegenteil.
+*Behebung:* den Teilnamen zuerst allein prüfen und den Zusatztext nur heranziehen,
+wenn er nichts ergibt; oder Treffer über alle Stufen sammeln und bei Uneinigkeit
+zwischen Teilname und Zusatztext die kleinere Stufe nehmen plus Hinweis im
+Bericht. `versand_kontrolle` fängt den Fehler nicht, weil sie gegen denselben
+Wert prüft.
 
 ---
 
@@ -295,18 +381,37 @@ dasselbe Teil an.
 
 ## Nächste Schritte
 
+- [ ] **F1 beheben** — die falsche Versandstufe ist der einzige Fehler, der im
+      Echtlauf tatsächlich Geld gekostet hätte. Schnellster Nutzen.
+- [ ] **D1 + D2 nachrüsten** — Angebotsformat und internationale Rücknahme
+      stimmen derzeit nur, weil eBays Voreinstellung zufällig passt
+- [ ] **E4** — die Tipp-Fenster-Selektoren treffen nicht; beim Nachbessern
+      gleich A1 mit erledigen (Blindklick raus, Positivliste rein)
 - [ ] Widerlegungsrunde für die mit ❓ markierten Funde nachholen
 - [ ] Blickwinkel „lügen die Kontrollfunktionen?" vollständig prüfen (Prüfer fiel aus)
 - [ ] Selektor-Brüchigkeit systematisch bewerten (Abschnitt C ist unvollständig)
-- [ ] Erst danach beheben — und zwar in der Reihenfolge oben
-- [ ] Ein überwachter Echtlauf steht weiterhin aus; er beantwortet A7 (implizites
-      Submit) und C1/C2 (Zustand, Preisfeld) direkt
+- [ ] Testentwurf `draftId=5184972239823` aufräumen, wenn er nicht mehr gebraucht wird
+
+Offen geblieben, weil der Echtlauf sie nicht herausgefordert hat: A1, A2, A5, A7,
+B2–B5, C1, C2. Für A7 (implizites Submit durch Enter) wäre ein gezielter Test
+nötig: `feld.evaluate("e => !!e.form")` an einer Merkmalzeile.
 
 ---
 
 ## Sitzungsprotokoll
 
-### 2026-08-01
+### 2026-08-01 — erster Echtlauf
+Merge nach `main` (war über PR #1–#4 auf GitHub bereits erfolgt, lokal nachgezogen
+auf `f8cf98a`). Selbsttest grün. Erster Echtlauf mit `Eingang/Test 1` gegen das
+echte Formular, mit Speichern — auf ausdrückliche Entscheidung des Nutzers, nachdem
+das Risiko aus A2/A5 benannt war.
+
+Ergebnis: Entwurf sauber angelegt, **nichts veröffentlicht**, alle Vorgaben bis auf
+die Versandstufe korrekt gesetzt. Ein neuer Fund (F1), einer bestätigt (E4). Neun
+Prüfbefunde blieben unberührt, weil der Lauf sie nicht herausforderte. Code
+unverändert.
+
+### 2026-08-01 — Audit
 Adversarische Prüfung von `draft.py` aufgesetzt (4 Prüfer + Widerlegung). Lauf
 brach am Sitzungsende ab; 21 Rohfunde von 3 Prüfern aus dem Journal gerettet und
 oben eingearbeitet. 16 davon selbst am Code nachgeprüft. Nichts am Code geändert.
