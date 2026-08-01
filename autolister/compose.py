@@ -40,12 +40,13 @@ Aufgaben:
    Ausreißer, keine anderen Teilenummern).
 3. Baue den TITEL (max. 80 Zeichen!) nach dem Muster:
    Original <Marke> <Modellcodes> <Teilname> <Position> <TeilenummerKompakt>
-4. Schätze die DHL-Versandstufe anhand der Teilegröße:
-   Standard (Halter, Sensoren, Kleinteile, Zierleisten),
+4. Schätze die Versandstufe anhand der Teilegröße. Es gibt GENAU DREI:
+   Standard (Halter, Sensoren, Kleinteile, Zierleisten, Blenden),
    Mittel (Scheinwerfer, Spiegel, größere Verkleidungen),
-   Groß (Stoßstangen, Türverkleidungen),
-   Spedition (Türen, Hauben, Kotflügel, Sitze).
-   Im Zweifel die kleinere Stufe.
+   Spedition (alles Sperrige: Stoßstangen, Träger, Türen, Hauben,
+              Kotflügel, Sitze, Türverkleidungen).
+   Die frühere Stufe "Groß" gibt es nicht mehr — sie ist in "Spedition"
+   aufgegangen. Im Zweifel die kleinere Stufe.
 
 Antworte NUR mit einem JSON-Objekt:
 {{
@@ -54,7 +55,7 @@ Antworte NUR mit einem JSON-Objekt:
   "modellcodes": "...",
   "kategorie_suchbegriff": "kurzer Suchbegriff für die eBay-Kategoriewahl",
   "vergleichbare_indizes": [0, 2, 5],
-  "versandstufe": "Standard | Mittel | Groß | Spedition",
+  "versandstufe": "Standard | Mittel | Spedition",
   "einbauposition": "vorne links | ... oder null",
   "hinweise_fuer_nutzer": ["offene Punkte, die der Nutzer prüfen sollte"]
 }}"""
@@ -205,9 +206,20 @@ def compose_listing(vision_result: Dict, research_result: Dict) -> Dict:
     if len(titel) > 80:
         ergebnis["titel"] = titel[:80].rstrip()
 
-    stufe = ergebnis.get("versandstufe", "Standard")
+    # Eine unbekannte Stufe darf NICHT stillschweigend zur billigsten werden.
+    # Vorher fiel ein vom Modell geliefertes "Groß" über den Default auf 7,69 €
+    # zurück — eine Stoßstange wäre so mit Standardversand inseriert worden.
+    # Jetzt: teuerste Stufe nehmen und den Nutzer darauf hinweisen.
+    stufe = ergebnis.get("versandstufe") or "Standard"
     preise = {name: preis for name, preis, _ in config.VERSAND_STUFEN}
-    ergebnis["versandpreis"] = preise.get(stufe, 7.69)
+    if stufe not in preise:
+        teuerste = max(config.VERSAND_STUFEN, key=lambda s: s[1])
+        ergebnis.setdefault("hinweise_fuer_nutzer", []).append(
+            "Unbekannte Versandstufe %r — vorsichtshalber '%s' (%.2f €) gesetzt. "
+            "Bitte im Entwurf prüfen." % (stufe, teuerste[0], teuerste[1]))
+        stufe = teuerste[0]
+        ergebnis["versandstufe"] = stufe
+    ergebnis["versandpreis"] = preise[stufe]
     return ergebnis
 
 

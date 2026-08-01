@@ -7,6 +7,126 @@ der Upload-Website hochladen, den Rest erledigt der Mac im Hintergrund.
 Veröffentlicht wird **nie** automatisch. Es entstehen ausschließlich Entwürfe,
 die du in Ruhe prüfst und selbst freigibst.
 
+---
+
+## Von null bis zum fertigen Entwurf
+
+### Schritt 0 — MacBook aufklappen
+
+**Du musst nichts tun.** Die beiden Hintergrunddienste starten beim Anmelden von
+selbst (`RunAtLoad`) und starten sich nach einem Absturz selbst neu
+(`KeepAlive`). Wenn du sichergehen willst:
+
+```bash
+launchctl list | grep autolisting
+```
+
+Zwei Zeilen = alles läuft. Die mittlere Spalte muss `0` sein; steht dort eine
+andere Zahl, ist der Dienst mit Fehler beendet worden — dann `logs/watcher.log`
+ansehen. Fehlt eine Zeile ganz:
+
+```bash
+launchctl load ~/Library/LaunchAgents/de.ommotors.autolisting.watcher.plist
+```
+
+### Schritt 1 — Fotos hineingeben
+
+Je Teil **ein eigener Ordner**. Die Fotos eines Ordners gehören zu einem
+Inserat. Mindestens eines davon muss die **eingestanzte Teilenummer scharf und
+formatfüllend** zeigen — daran hängt alles Weitere.
+
+**Weg A — vom MacBook (Finder):**
+Ordner anlegen in `~/Auto-Listing/Eingang/`, Fotos hineinziehen. Fertig.
+
+**Weg B — vom Handy (gleiches WLAN):**
+Im Browser öffnen — `http://MacBook-Air-von-Ogulcan.local:8790`
+(oder, falls der Name nicht auflöst, `http://192.168.0.248:8790`; die IP kann
+sich ändern, den aktuellen Stand liefert `ipconfig getifaddr en0`).
+Fotos auswählen, hochladen. Die Website legt den Ordner selbst an.
+
+> **Kennst du die Teilenummer schon?** Dann benenne den Ordner danach
+> (z. B. `8K0857552`) — sie wird dann direkt übernommen, ohne Raten. Namen wie
+> „Test 1" oder automatische Upload-Namen erkennt die Pipeline als
+> Nicht-Nummern und liest weiter von den Fotos.
+
+### Schritt 2 — warten
+
+Ab jetzt läuft alles allein. Ablauf und ungefähre Dauer:
+
+| | was passiert | Dauer |
+|---|---|---|
+| 1 | Der Watcher wartet, bis **25 Sekunden Ruhe** im Eingang sind (damit AirDrop und Uploads fertig werden) | 25 s |
+| 2 | macOS-Texterkennung liest die Teilenummer, jedes Foto in vier Drehungen | ~5 s |
+| 3 | eBay-Recherche: Vergleichsangebote und verkaufte Artikel zur Nummer | ~20 s |
+| 4 | Ein **sichtbares Browserfenster** öffnet sich und füllt das Verkaufsformular | 3–5 min |
+| 5 | Es klickt **„Speichern"** — nie „einstellen" | |
+
+**Das Browserfenster nicht wegklicken und den Mac nicht zuklappen**, solange es
+arbeitet. Zusehen ist ausdrücklich erwünscht: so merkst du, wenn eBay das
+Formular umgebaut hat.
+
+### Schritt 3 — Meldung abwarten
+
+Am Ende kommt eine **macOS-Mitteilung** mit Titel und Preis. Gleichzeitig
+entsteht ein Bericht:
+
+```bash
+open ~/Auto-Listing/Berichte
+```
+
+Die neueste Datei ist deine. Lies dort zwei Abschnitte:
+
+- **„Im eBay-Entwurf noch von Hand setzen"** — steht das dort, hat ein
+  Formularschritt nicht gegriffen. Die Punkte sind einzeln abhakbar formuliert.
+- **„Bitte prüfen"** — Preisgrundlage, Versandstufe und alles, was die Pipeline
+  geraten statt gemessen hat.
+
+Fehlen **beide** Abschnitte, ist im Entwurf nichts mehr zu tun.
+
+### Schritt 4 — freigeben (das machst du selbst)
+
+Den Entwurf öffnen (die Adresse steht im Bericht unter **Entwurf**), Fotos und
+Preis kurz gegenlesen, dann **selbst** einstellen. Die Automation klickt
+grundsätzlich nie auf „einstellen" — das bleibt deine Entscheidung.
+
+Die Fotos sind inzwischen nach `Erledigt/<Teilenummer>/` gewandert, der Eingang
+ist wieder leer und bereit für das nächste Teil.
+
+### Wenn etwas schiefgeht
+
+Ein Fehler bricht nur **dieses eine Teil** ab, nicht den ganzen Lauf. Es
+entsteht eine Datei in `Fehler/` mit Klartext und Screenshot:
+
+```bash
+open ~/Auto-Listing/Fehler
+```
+
+Die zwei häufigsten Fälle:
+
+- **„Keine Teilenummer im erkannten Text gefunden"** — das Foto der Nummer war
+  zu unscharf oder zu schräg. Ein besseres Foto nachlegen, oder den Ordner
+  gleich nach der Teilenummer benennen.
+- **„Sicherheitsabfrage" / CAPTCHA** — eBay will dich sehen. Einmal selbst
+  einloggen, dann läuft es wieder von allein:
+  ```bash
+  cd ~/Auto-Listing && .venv/bin/python -m autolister.login
+  ```
+
+Im Zweifel zuerst den Selbsttest laufen lassen, er prüft alle Voraussetzungen
+auf einmal:
+
+```bash
+cd ~/Auto-Listing && .venv/bin/python -m autolister.doctor
+```
+
+### Mehrere Teile auf einmal
+
+Einfach mehrere Ordner in den Eingang legen. Die Bildanalyse läuft parallel,
+die Browser-Arbeit nacheinander in **einem** Fenster — vier Teile brauchen also
+kaum länger als eines plus vier Formulare.
+
+---
+
 ## Warum das nichts kostet
 
 Die Teilenummer liest die **in macOS eingebaute Texterkennung** von den Fotos —

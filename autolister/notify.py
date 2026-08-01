@@ -30,6 +30,8 @@ SCHRITT_KLARTEXT = {
     "Angebot bewerben": "Anzeigentarif auf 2 %% setzen "
                         "(Knopf 'Eigenen Anzeigentarif auswählen')",
     "Rücknahme": "Rücknahme einschalten: 14 Tage Inland, Käufer zahlt Rückversand",
+    "Angebotsformat": "Format auf 'Sofort-Kaufen' stellen (nicht Auktion)",
+    "Kein internationaler Versand": "Schalter 'Internationaler Versand' ausschalten",
     "Versandkosten": "Versand auf %(versand)s stellen",
     "Preis": "Preis eintragen: %(preis)s",
     "Titel": "Titel eintragen",

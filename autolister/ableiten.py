@@ -188,13 +188,40 @@ def position(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
     return None
 
 
-def versandstufe(teil: Optional[str], zusatztext: str = "") -> str:
-    """Versandstufe über Stichwörter schätzen; im Zweifel die kleinste."""
-    text = ((teil or "") + " " + zusatztext).lower()
+def _stufe_aus_text(text: str) -> Optional[str]:
+    """Erstes passendes Stichwort gewinnt (Liste läuft von groß nach klein)."""
+    text = (text or "").lower()
     for stufe, stichwoerter in VERSAND_STICHWOERTER:
         if any(s in text for s in stichwoerter):
             return stufe
-    return "Standard"
+    return None
+
+
+def versandstufe(teil: Optional[str], zusatztext: str = "") -> str:
+    """Versandstufe über Stichwörter schätzen; im Zweifel die kleinste.
+
+    **Der Teilname entscheidet allein.** Die Titel der Vergleichsangebote
+    kommen erst zum Zug, wenn der Teilname gar kein Stichwort enthält.
+
+    Vorher lagen beide in einem String, und weil die Stufenliste von groß nach
+    klein läuft, schlug ein einzelnes Wort aus einem fremden Titel den echten
+    Teilnamen. Im Echtlauf am 2026-08-01 bekam eine **Sonnenblende** dadurch
+    die Stufe „Mittel" (23,99 €) statt „Standard" (7,69 €) — ein „Spiegel" in
+    einem Vergleichstitel genügte. Bei 29,90 € Artikelpreis kostet ein solcher
+    Aufschlag Verkäufe.
+
+    Zusätzlich entscheidet **das erste Wort des Teilnamens** vor dem Rest.
+    Deutsche Teilebezeichnungen stellen das eigentliche Teil voran und hängen
+    an, wofür es ist: ein „Halter Stoßfänger" ist ein Halter (Standard, 7,69 €),
+    keine Stoßstange (Spedition, 60 €). Ohne diese Regel gewann „stoßfänger",
+    weil die Stufenliste von groß nach klein läuft — und CLAUDE.md führt
+    „Halter" ausdrücklich unter Standard.
+    """
+    kopf = (teil or "").strip().split()
+    return (_stufe_aus_text(kopf[0] if kopf else "")
+            or _stufe_aus_text(teil)
+            or _stufe_aus_text(zusatztext)
+            or "Standard")
 
 
 def baue_titel(hersteller: Optional[str], codes: str, teil: Optional[str],

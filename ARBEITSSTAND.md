@@ -92,6 +92,47 @@ Was fehlt:
 
 Legende: ✅ = am Code selbst nachgeprüft · ❓ = aus dem abgebrochenen Lauf, ungeprüft
 
+> **Stand 2026-08-01, abends: die meisten Befunde sind behoben.** Was unten
+> steht, ist die Befundlage *vor* der Behebung — sie bleibt als Begründung
+> stehen, damit niemand die Härtung später wieder herausnimmt. Was erledigt
+> ist, steht im Abschnitt **„Behoben"** direkt darunter.
+
+---
+
+## Behoben (2026-08-01)
+
+| Fund | Was jetzt gilt | Belegt durch |
+|---|---|---|
+| **A1/E4** | Blindklick-Schleife raus. `_dialoge_schliessen` nutzt eine Erlaubnisliste aus den echten Klassen (`tourtip__close`, `infotip__close`, `lightbox-dialog__close`); jeder Klick läuft über `_safe_click` | Trockenlauf |
+| **A2** | `_safe_click` ist **fail-closed** und liest `inner_text` + `aria-label` + `title` + `value`. Unlesbar = kein Klick | Trockenlauf |
+| **A3** | `FORBIDDEN` kennt „veröffentlichen", „aktivieren", „kostenpflichtig", „Gebühren", „publish", „list it/for free" | Testfälle |
+| **A5** | Speichern greift auf `button[aria-label='Speichern']`; der `.last`-Teilstring-Fallback ist weg | Selektor live verifiziert |
+| **A6** | Nach dem Speichern prüft `_ist_noch_entwurf()`, dass `draftId` steht und nichts online ging | — |
+| **B1/B2** | **12 von 12** Formularschritten haben eine Kontrolle (vorher 4). Nur der Screenshot braucht keine | AST-Prüfung |
+| **B3** | Anzeigentarif-Kontrolle liest `promotedListingSelection` + `customAdRateField`. Der Teilstring-Fehler („2 %" in „12 %") ist weg | Trockenlauf |
+| **B4** | Rücknahme-Kontrolle prüft alle drei: `returnPolicy`, `returnDuration`, `returnShippingPayer` | Trockenlauf |
+| **B5** | Die Rückfallebene, die sich am Nachbarfeld bestätigte, ist ersatzlos entfernt | Trockenlauf |
+| **B6** | Merkmalvergleich über den ganzen Wert statt sechs Zeichen, tolerant gegen Leerzeichen/Bindestriche | Testfälle |
+| **B7** | `listing["versandpreis"]` ohne Default — ein fehlender Wert fällt auf | — |
+| **C1/C2** | Zustand über `button[name='condition']` kontrolliert; Preis auf `input[aria-label='Artikelpreis']` festgenagelt | Trockenlauf |
+| **D1** | Angebotsformat wird auf `FixedPrice` gesetzt und kontrolliert | Trockenlauf |
+| **D2** | `isInternationalShippingOn` wird auf aus gesetzt und kontrolliert | Trockenlauf |
+| **E1** | „Groß" aus dem KI-Prompt raus; unbekannte Stufe → teuerste Stufe + Hinweis statt stumm 7,69 € | Testfälle |
+| **F1** | Versandstufe: Teilname entscheidet, danach erst die Vergleichstitel; erstes Wort vor dem Rest | 12 Testfälle |
+
+**Neu gefunden und behoben:** Die Einstiegsschleife suchte Knöpfe mit
+`exact=False` nach „Weiter" — und traf damit „Zum er**weiter**ten
+Verkaufsformular wechseln". Im ersten Echtlauf wurde dieser Knopf tatsächlich
+geklickt; erst die erweiterte `FORBIDDEN`-Liste hat es im Trockenlauf sichtbar
+gemacht und blockiert.
+
+**Noch offen:** A7 (implizites Submit durch Enter) und E2/E3 sind unverändert.
+Die Kontrollen von Preis und Merkmal „Hersteller" haben im Trockenlauf
+**Fehlalarm** gegeben — beide Werte standen korrekt im Entwurf. Ursache ist die
+React-Übernahme; die Kontrollen lesen jetzt bis zu dreimal mit Pause. **Das ist
+noch nicht am Formular nachgewiesen** — beim nächsten Lauf darauf achten, ob
+der Bericht wieder Phantomarbeit auflistet.
+
 ---
 
 ### A — Kann die Automation veröffentlichen?
