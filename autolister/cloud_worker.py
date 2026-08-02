@@ -76,7 +76,16 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
                  listing.get("preis"))
 
         # Erst jetzt aufräumen — vorher wäre bei einem Abbruch alles weg.
-        cloud.fotos_loeschen(auftrag.get("fotos") or [])
+        #
+        # Im Trockenlauf NICHT löschen: Dort wird kein Entwurf gespeichert und
+        # `_finish()` läuft nicht, die Originale landen also auch nicht in
+        # `Erledigt/`. Ein Löschen im Speicher hätte die Fotos damit endgültig
+        # vernichtet — ausgerechnet beim Durchlauf, der zum gefahrlosen
+        # Ausprobieren gedacht ist.
+        if dry_run:
+            log.info("[%s] Trockenlauf — Fotos bleiben im Speicher", kennung)
+        else:
+            cloud.fotos_loeschen(auftrag.get("fotos") or [])
 
     except BaseException as fehler:  # noqa: BLE001 — ein Auftrag darf nie den Dienst kippen
         log.exception("[%s] fehlgeschlagen", kennung)

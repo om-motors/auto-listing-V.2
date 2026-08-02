@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Cloud-Arbeiter: holt Handy-Uploads aus Supabase und legt eBay-Entwürfe an.
+
+  Einrichten:
+    cp launchd/de.ommotors.autolisting.cloud.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/de.ommotors.autolisting.cloud.plist
+
+  Anhalten:
+    launchctl unload ~/Library/LaunchAgents/de.ommotors.autolisting.cloud.plist
+
+  WICHTIG: Nicht gleichzeitig mit dem Ordner-Watcher betreiben. Beide öffnen
+  dasselbe Browser-Profil, und Chromium lässt ein Profil nur einmal öffnen —
+  der zweite Dienst scheitert dann sporadisch mitten im Formular.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>de.ommotors.autolisting.cloud</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ogulcang/Auto-Listing/.venv/bin/python</string>
+    <string>-m</string>
+    <string>autolister.cloud_worker</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/ogulcang/Auto-Listing</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <!-- Bremst Neustarts bei dauerhaftem Fehler. Ohne das schreibt ein
+       abstürzender Dienst binnen Minuten hunderte Fehler ins Protokoll. -->
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/Users/ogulcang/Auto-Listing/logs/cloud.log</string>
+  <key>StandardErrorPath</key><string>/Users/ogulcang/Auto-Listing/logs/cloud.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
