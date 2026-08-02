@@ -95,10 +95,81 @@ def warteschlange_leeren(dry_run: bool = False) -> int:
         auftrag_verarbeiten(auftrag, dry_run)
 
 
+def _selbsttest() -> bool:
+    """Prüft die Einrichtung, ohne etwas zu verändern.
+
+    Gedacht für den Moment direkt nach dem Eintragen der Schlüssel: sagt
+    zuverlässig, ob der Mac die Warteschlange erreicht — und ob dort auch
+    wirklich der `service_role`-Schlüssel steht und nicht versehentlich der
+    öffentliche.
+    """
+    import base64
+    import json as _json
+
+    def zeile(ok: bool, text: str) -> None:
+        print(("  OK   " if ok else "  FEHLT") + "  " + text)
+
+    print("Selbsttest der Web-App-Anbindung\n" + "=" * 52)
+    gut = True
+
+    zeile(bool(cloud.SUPABASE_URL), "SUPABASE_URL: %s" % (cloud.SUPABASE_URL or "—"))
+    gut &= bool(cloud.SUPABASE_URL)
+
+    if not cloud.SERVICE_KEY:
+        zeile(False, "SUPABASE_SERVICE_KEY ist leer")
+        return False
+
+    # Rolle aus dem Schlüssel lesen — ohne ihn auszugeben.
+    rolle = "unbekannt"
+    try:
+        nutzlast = cloud.SERVICE_KEY.split(".")[1]
+        nutzlast += "=" * (-len(nutzlast) % 4)
+        rolle = _json.loads(base64.urlsafe_b64decode(nutzlast)).get("role", "?")
+    except Exception:
+        pass
+    if rolle == "service_role":
+        zeile(True, "Schlüsselrolle: service_role")
+    elif rolle == "anon":
+        zeile(False, "Das ist der ÖFFENTLICHE anon-Schlüssel! Der service_role-"
+                     "Schlüssel steht in Supabase unter Project Settings -> API Keys.")
+        return False
+    else:
+        # Neuere Supabase-Schlüssel (sb_secret_...) sind kein JWT — dann
+        # entscheidet der Verbindungstest unten.
+        zeile(True, "Schlüsselrolle nicht ablesbar (%s) — wird gleich geprüft" % rolle)
+
+    try:
+        offen = cloud._anfrage("/rest/v1/auftraege?select=id,status&limit=5")
+        zeile(True, "Tabelle 'auftraege' erreichbar (%d Eintrag/Einträge sichtbar)"
+                    % len(offen or []))
+    except Exception as fehler:
+        zeile(False, "Tabelle nicht erreichbar: %s" % fehler)
+        print("\n  -> Ist supabase/schema.sql im SQL-Editor gelaufen?")
+        return False
+
+    try:
+        cloud._anfrage("/storage/v1/object/list/%s" % cloud.BUCKET, methode="POST",
+                       daten=_json.dumps({"prefix": "", "limit": 1}).encode("utf-8"),
+                       kopfzeilen={"Content-Type": "application/json"})
+        zeile(True, "Speicher-Bucket '%s' erreichbar" % cloud.BUCKET)
+    except Exception as fehler:
+        zeile(False, "Bucket '%s' nicht erreichbar: %s" % (cloud.BUCKET, fehler))
+        return False
+
+    print("=" * 52)
+    print("Alles bereit. Fotos hochladen — der Arbeiter holt sie ab.")
+    return bool(gut)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     config.ensure_dirs()
+
+    # Vor der Vollständigkeitsprüfung: der Selbsttest soll ja gerade dann
+    # etwas Brauchbares sagen, wenn noch etwas fehlt.
+    if "--pruefen" in sys.argv:
+        sys.exit(0 if _selbsttest() else 1)
 
     if not cloud.eingerichtet():
         print("SUPABASE_URL und SUPABASE_SERVICE_KEY fehlen in der .env.\n"

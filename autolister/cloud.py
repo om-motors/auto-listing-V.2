@@ -19,6 +19,12 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Muss VOR dem Lesen von os.environ stehen: config lädt beim Import die .env.
+# Ohne diesen Import hängt es von der Reihenfolge der Importe im aufrufenden
+# Modul ab, ob die Werte unten schon da sind — beim Selbsttest kam so eine
+# leere SUPABASE_URL heraus, obwohl sie in der .env stand.
+from . import config  # noqa: F401  (nur wegen der Nebenwirkung)
+
 log = logging.getLogger("autolister")
 
 SUPABASE_URL = (os.environ.get("SUPABASE_URL", "") or "").rstrip("/")
