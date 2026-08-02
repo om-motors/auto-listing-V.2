@@ -570,12 +570,35 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
 
 
 def _merkmal_wert(page, label: str) -> str:
-    """Gesetzten Wert eines Merkmals ablesen — steht im Aufklapp-Knopf."""
-    knopf = _merkmal_knopf(page, label)
-    if knopf is None:
-        return ""
+    """Gesetzten Wert eines Merkmals ablesen — über die Position in der Liste.
+
+    Am echten Formular nachgemessen (2026-08-02): **Sobald ein Merkmal einen
+    Wert trägt, entfernt eBay dessen `aria-label`.** Die gefüllten Felder
+    zeigten `aria=''` mit Text „Audi", „Sonnenblende", „8K0857552"; nur die
+    leeren trugen noch ihren Namen. Jeder Selektor, der am `aria-label` hängt,
+    findet ein gefülltes Merkmal also nicht mehr — genau daran scheiterte das
+    Zurücklesen von „Hersteller".
+
+    Beschriftungen (`button.tooltip__host`) und Wertfelder
+    (`button.se-expand-button__button`) stehen aber in **derselben
+    Reihenfolge**. Über den Index gefunden, trägt es in beiden Zuständen.
+
+    Exakter Vergleich zuerst: „Hersteller" darf nicht „Herstellernummer"
+    greifen. Erst danach der Präfixvergleich — das Feld heißt real
+    „OE/OEM Referenznummer(n)".
+    """
     try:
-        return (knopf.inner_text(timeout=3000) or "").strip()
+        return page.evaluate("""(gesucht) => {
+          const norm = (s) => (s || '').trim().toLowerCase();
+          const ziel = norm(gesucht);
+          const labels = [...document.querySelectorAll('button.tooltip__host')];
+          const felder = [...document.querySelectorAll(
+                            'button.se-expand-button__button')];
+          let i = labels.findIndex(l => norm(l.innerText) === ziel);
+          if (i < 0) i = labels.findIndex(l => norm(l.innerText).startsWith(ziel));
+          if (i < 0 || i >= felder.length) return '';
+          return (felder[i].innerText || '').trim();
+        }""", label) or ""
     except Exception:
         return ""
 
@@ -805,14 +828,26 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         # Das Feld heißt je nach Formularzustand anders — mal "Beschreibung"
         # (aria-label), mal "description" (name). Deshalb mehrere Schreibweisen
         # prüfen statt einer.
-        # Nur Felder mit echtem Textinhalt: das Muster trifft sonst auch
-        # `descriptionEditorMode` — ein Schalter, der "false" liefert. Genau
-        # das meldete der Trockenlauf als "gelesen 'false'". Deshalb Schalter
-        # ausschließen und von den Treffern den längsten nehmen.
-        kandidaten = [w for s, w in werte.items()
-                      if re.search(r"beschreib|description", s, re.I)
-                      and w not in ("true", "false")]
-        roh = max(kandidaten, key=len) if kandidaten else ""
+        # Zuerst im Editor selbst nachsehen — dort steht der Text sofort.
+        #
+        # Das versteckte Textfeld taugt hier nicht: eBay belegt es beim Anlegen
+        # mit dem TITEL vor, und der Rich-Text-Editor schreibt seinen Inhalt
+        # erst beim Verlassen zurück. Die Kontrolle las deshalb am 2026-08-02
+        # "original audi a4 b8 a5 sonnenblende vorne 8k0857552" — den Titel —
+        # und meldete die Beschreibung als fehlend, obwohl sie im Editor stand.
+        roh = ""
+        try:
+            roh = page.frame_locator("iframe#se-rte-frame__summary") \
+                      .locator("body").inner_text(timeout=6000) or ""
+        except Exception:
+            pass
+        if not roh:
+            # Rückfallebene: das versteckte Feld. Schalterwerte ausschließen,
+            # sonst trifft das Muster auch `descriptionEditorMode` ("false").
+            kandidaten = [w for s, w in werte.items()
+                          if re.search(r"beschreib|description", s, re.I)
+                          and w not in ("true", "false")]
+            roh = max(kandidaten, key=len) if kandidaten else ""
         if not roh:
             _LETZTE_ABWEICHUNG = ("kein gefülltes Beschreibungsfeld gefunden "
                                   "(vorhanden: %s)" % (", ".join(sorted(werte)[:12]) or "keine"))

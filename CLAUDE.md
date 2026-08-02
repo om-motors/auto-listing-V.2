@@ -171,8 +171,37 @@ Aufbau einer Zeile: Beschriftung, sichtbarer Aufklapp-Knopf
    gesetzten Merkmal weiterhin dessen Feld — alle folgenden blieben leer.
 4. Das Feld heißt real `OE/OEM Referenznummer(n)`; exakter Vergleich schlägt
    fehl, Präfix-Vergleich nötig. Und sobald ein Merkmal gefüllt ist,
-   **entfernt eBay dessen `aria-label`** — das Zurücklesen braucht deshalb
-   Rückfallebenen.
+   **entfernt eBay dessen `aria-label`**.
+
+**Zum Zurücklesen deshalb nur über die Position gehen.** Am echten Formular
+nachgemessen (2026-08-02) — die gefüllten Felder trugen `aria=''` mit dem Text
+`Audi`, `Sonnenblende`, `8K0857552`, nur die leeren noch ihren Namen:
+
+```
+aria=''                 text='Audi'           <- Hersteller, gefüllt
+aria=''                 text='Sonnenblende'   <- Produktart, gefüllt
+aria='Farbe'            text=''               <- leer, Name noch da
+aria='Einbauposition'   text=''
+aria=''                 text='8K0857552'      <- Herstellernummer, gefüllt
+```
+
+Jeder Selektor über `aria-label` findet ein **ausgefülltes** Merkmal also
+grundsätzlich nicht mehr — beim Setzen greift er noch, beim Kontrollieren nie.
+Beschriftungen (`button.tooltip__host`) und Wertfelder
+(`button.se-expand-button__button`) stehen aber **in derselben Reihenfolge**;
+`_merkmal_wert()` paart sie deshalb über den Index. Exakter Namensvergleich
+zuerst, sonst greift „Hersteller" das Feld „Herstellernummer".
+
+**Die Beschreibung ist beim Anlegen mit dem Titel vorbelegt.** Das versteckte
+`textarea[Beschreibung]` trägt zunächst den Angebotstitel, und der
+Rich-Text-Editor schreibt seinen Inhalt erst beim Verlassen dorthin zurück.
+Eine Kontrolle, die das Textfeld liest, prüft also gegen den Titel. Richtig ist
+der Blick in den Editor selbst: `iframe#se-rte-frame__summary` → `body`.
+
+**Die Fotos zählt man an eBays eigenem Zähler.** Über dem Fotofeld steht
+`3/25`. Die Vorschaubilder stecken weder als `ebayimg`- noch als `blob:`-Adresse
+in einem `<img>` — wer sie zählt, findet null, während drei Fotos sichtbar
+hochgeladen sind.
 
 **Anzeigentarif, Rücknahme, Versand**
 

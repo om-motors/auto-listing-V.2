@@ -141,12 +141,27 @@ Verkaufsformular wechseln". Im ersten Echtlauf wurde dieser Knopf tatsächlich
 geklickt; erst die erweiterte `FORBIDDEN`-Liste hat es im Trockenlauf sichtbar
 gemacht und blockiert.
 
-**Noch offen:** A7 (implizites Submit durch Enter) und E2/E3 sind unverändert.
-Die Kontrollen von Preis und Merkmal „Hersteller" haben im Trockenlauf
-**Fehlalarm** gegeben — beide Werte standen korrekt im Entwurf. Ursache ist die
-React-Übernahme; die Kontrollen lesen jetzt bis zu dreimal mit Pause. **Das ist
-noch nicht am Formular nachgewiesen** — beim nächsten Lauf darauf achten, ob
-der Bericht wieder Phantomarbeit auflistet.
+**Die Fehlalarme sind erledigt (2026-08-02, Trockenlauf 18:50).** Der Bericht
+listet **keine** offenen Punkte mehr, und das ist unabhängig nachgeprüft: alle
+Feldwerte am Entwurf zurückgelesen, nichts veröffentlicht. Vier Kontrollen
+hatten Handarbeit gemeldet, obwohl alles gesetzt war — vier verschiedene
+Ursachen, alle am Formular gemessen statt geraten:
+
+| Kontrolle | Ursache | Lösung |
+|---|---|---|
+| Preis | frisch angelegter Entwurf nennt Felder anders als ein nachgeladener (`name` statt `aria-label`) | `_formularwerte()` legt jedes Feld unter **beiden** Schlüsseln ab |
+| Fotos | Vorschaubilder sind keine `<img>` mit `ebayimg`/`blob:` | eBays eigenen Zähler „3/25" lesen |
+| Beschreibung | das versteckte Textfeld ist mit dem **Titel** vorbelegt; der Editor schreibt erst beim Verlassen zurück | direkt im `iframe#se-rte-frame__summary` lesen |
+| Merkmal „Hersteller" | eBay entfernt das `aria-label`, **sobald ein Feld gefüllt ist** | Beschriftung und Wertfeld über die **Position** paaren |
+
+Die letzte war eine Zeitbombe unter allen vier Merkmalen — dass die anderen
+drei durchkamen, war Zufall über die XPath-Rückfallebene. Alles Weitere in
+`CLAUDE.md` unter „Artikelmerkmale".
+
+**Noch offen:** A7 (implizites Submit durch Enter) sowie E2/E3 sind unverändert.
+
+**Aufräumen:** Im Testkonto `samekili9` liegen inzwischen rund sechs Entwürfe
+aus den Trockenläufen. Die stören nicht, können aber weg.
 
 ---
 
