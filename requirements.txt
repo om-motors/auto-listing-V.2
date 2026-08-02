@@ -6,9 +6,12 @@ python-dotenv>=1.0
 pillow>=11.0
 pillow-heif>=1.0
 
-# Kostenlose Texterkennung über das in macOS eingebaute Vision-Framework
-pyobjc-framework-Vision>=10.0
-pyobjc-framework-Quartz>=10.0
+# Kostenlose Texterkennung über das in macOS eingebaute Vision-Framework.
+# Der Marker ist nicht kosmetisch: ohne ihn versucht jede Installation auf
+# Linux, diese Pakete zu bauen, und scheitert an /usr/bin/sw_vers. Genau
+# daran brach der erste Netlify-Deploy ab.
+pyobjc-framework-Vision>=10.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 
 # Nur für die optionale, kostenpflichtige Betriebsart "api"
 anthropic>=0.100

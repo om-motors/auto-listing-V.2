@@ -4,7 +4,16 @@
 # HTML-Datei ohne Abhängigkeiten. Netlify liefert sie einfach aus.
 
 [build]
-  publish = "web"
+  # `base` zeigt bewusst auf web/ — dort liegt keine requirements.txt.
+  #
+  # Ohne das durchsucht Netlify das Wurzelverzeichnis, findet die
+  # requirements.txt der Pipeline und versucht, sie zu installieren. Das
+  # scheitert zwangsläufig: pyobjc-framework-Vision ist die macOS-Texterkennung
+  # und lässt sich auf Netlifys Linux gar nicht bauen (es sucht /usr/bin/sw_vers).
+  # Für eine Seite, die aus einer einzigen HTML-Datei besteht, wäre das ohnehin
+  # sinnlos.
+  base = "web"
+  publish = "."
   command = ""
 
 # Sicherheitskopfzeilen. Die Seite lädt nichts von fremden Servern und spricht

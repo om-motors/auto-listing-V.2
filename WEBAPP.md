@@ -83,11 +83,24 @@ Die Einstellungen stehen schon in [`netlify.toml`](netlify.toml):
 
 | Feld | Wert |
 |---|---|
+| Base directory | `web` |
 | Build command | *(leer)* |
-| Publish directory | `web` |
+| Publish directory | `.` |
 
 Es wird nichts gebaut und nichts installiert — die Seite ist eine einzige
-HTML-Datei ohne Fremdabhängigkeiten. Nach dem Deploy bekommst du eine Adresse
+HTML-Datei ohne Fremdabhängigkeiten.
+
+> **Warum `base = web` und nicht einfach `publish = web`?** Netlify durchsucht
+> das Basisverzeichnis nach Paketlisten und installiert, was es findet. Zeigt
+> die Basis auf das Wurzelverzeichnis, stößt es auf die `requirements.txt` der
+> Pipeline und versucht, `pyobjc-framework-Vision` zu bauen — die
+> macOS-Texterkennung. Auf Netlifys Linux scheitert das zwangsläufig
+> (`/usr/bin/sw_vers` fehlt), und der Deploy bricht ab. Mit `base = web` sieht
+> Netlify nur die beiden Dateien, die es ausliefern soll.
+>
+> Zusätzlich tragen die pyobjc-Zeilen in `requirements.txt` jetzt den Marker
+> `; sys_platform == "darwin"` — damit überspringt jede Installation auf Linux
+> sie von sich aus. Nach dem Deploy bekommst du eine Adresse
 wie `https://auto-listing-v2.netlify.app`. Die aufs Handy, zum Startbildschirm
 hinzufügen, fertig.
 
