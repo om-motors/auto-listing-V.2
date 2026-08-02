@@ -218,10 +218,32 @@ def versandstufe(teil: Optional[str], zusatztext: str = "") -> str:
     „Halter" ausdrücklich unter Standard.
     """
     kopf = (teil or "").strip().split()
-    return (_stufe_aus_text(kopf[0] if kopf else "")
-            or _stufe_aus_text(teil)
-            or _stufe_aus_text(zusatztext)
-            or "Standard")
+    aus_teil = _stufe_aus_text(kopf[0] if kopf else "") or _stufe_aus_text(teil)
+    if aus_teil:
+        return aus_teil
+
+    # **Ein bekannter Teilname ohne Treffer ist selbst eine Aussage.** Die
+    # Stichwortliste führt die sperrigen Teile auf — Tür, Haube, Kotflügel,
+    # Stoßstange, Träger, Sitz, Motor. Steht der Teilname dort nicht drin, ist
+    # das ein Hinweis auf ein kleines Teil, kein Zweifelsfall. Fremde
+    # Vergleichstitel dürfen dann gar nicht mitreden.
+    #
+    # Am 2026-08-02 bekam ein **Schmutzfänger** für 38,90 € über genau diesen
+    # Weg die Stufe „Spedition" zu 60 € — aus den Vergleichstiteln, in denen
+    # „Kotflügel" und „Träger" vorkamen. Bei dem Preis verkauft sich nichts.
+    if (teil or "").strip():
+        return "Standard"
+
+    # Nur wenn gar kein Teilname vorliegt (Texterkennung ohne Ergebnis), helfen
+    # die Vergleichstitel aus — dann die **kleinste** gefundene Stufe, gemäß
+    # der Vorgabe aus CLAUDE.md: „Im Zweifel die kleinste Stufe wählen."
+    text = (zusatztext or "").lower()
+    gefunden = {stufe for stufe, worte in VERSAND_STICHWOERTER
+                if any(w in text for w in worte)}
+    if not gefunden:
+        return "Standard"
+    rang = {"Standard": 0, "Mittel": 1, "Spedition": 2}
+    return min(gefunden, key=lambda s: rang.get(s, 99))
 
 
 def baue_titel(hersteller: Optional[str], codes: str, teil: Optional[str],

@@ -782,6 +782,20 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         raise DraftError("Verkaufsformular wurde nicht erreicht (URL: %s)" % page.url)
     draft_url = page.url
 
+    def _entwurfsadresse() -> str:
+        """Die Adresse mit `draftId` — die einzige, die den Entwurf öffnet.
+
+        Die Warteschleife oben bricht schon ab, sobald `/lstng` in der URL
+        steht; die `draftId` vergibt eBay teils erst kurz danach. Beim ersten
+        Auftrag vom Handy (2026-08-02) landete deshalb eine Adresse ohne
+        `draftId` im Bericht — der Link führte auf die Seite *vor* dem Entwurf.
+        """
+        for _ in range(10):
+            if "draftId" in (page.url or ""):
+                return page.url
+            page.wait_for_timeout(700)
+        return page.url
+
     # Der Wechsel-Dialog erscheint sofort nach dem Anlegen des Entwurfs und
     # blockiert alles Weitere — deshalb hier schon wegräumen, nicht erst
     # nach dem Foto-Upload.
@@ -1240,7 +1254,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
 
     if dry_run:
         warnings.append("TROCKENLAUF: Formular ausgefüllt, aber NICHT gespeichert.")
-        return {"draft_url": draft_url, "screenshot": str(shot) if shot.exists() else None}
+        return {"draft_url": _entwurfsadresse(), "screenshot": str(shot) if shot.exists() else None}
 
     # --- SPEICHERN (niemals veröffentlichen!) ---
     # Am echten Formular heißt der gewollte Knopf exakt
@@ -1290,4 +1304,4 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             "ebay.de/sh/lst/active nachsehen, ob versehentlich ein Angebot online "
             "gegangen ist." % (page.url or "")[:120])
 
-    return {"draft_url": draft_url, "screenshot": str(shot) if shot.exists() else None}
+    return {"draft_url": _entwurfsadresse(), "screenshot": str(shot) if shot.exists() else None}
