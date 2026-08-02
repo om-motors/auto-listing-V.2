@@ -478,6 +478,92 @@ sinnvollen API-Ersatz.
 Umbau, bevor Punkt 1 beantwortet ist — die Browser-Automation ist gerade erst
 gehärtet und funktioniert nachweislich.
 
+### Rechercheergebnis (2026-08-02)
+
+**Kosten: keine.** Die APIs sind kostenfrei, Limits lassen sich über den
+„Application Growth Check" gratis anheben. Der Kostenpunkt der Empfehlung
+stimmt. Die Probleme liegen woanders.
+
+**1. Der Entwurf im Verkäuferportal ist über die offenen APIs nicht erreichbar.**
+Das ist der Show-Stopper.
+
+- `createOffer` (Inventory API) legt ein *unpublished offer* an. Das erscheint
+  **nicht** unter `ebay.de/sh/lst/drafts`. Sichtbar wird es erst durch
+  `publishOffer` — und dann ist es live, also kein Entwurf mehr.
+- Die API, die echte Portal-Entwürfe anlegt, ist `createItemDraft` aus der
+  **Listing API**. Die ist **Limited Release**, nur für von eBay freigegebene
+  Partner.
+- Perplexitys Kernsatz („`createOffer` erzeugt strukturell garantiert nur einen
+  Entwurf") ist damit halb richtig: Es erzeugt garantiert **kein Live-Inserat** —
+  das stimmt und ist wertvoll. Es erzeugt aber auch **keinen Entwurf** im Sinne
+  des Portals. Der heutige Ablauf „Entwurf ansehen, prüfen, selbst freigeben"
+  fiele weg.
+
+**2. Die Preisquelle „verkaufte Artikel" fällt weg.**
+
+- Der einzige offizielle Weg zu verkauften Artikeln ist die **Marketplace
+  Insights API** — ebenfalls Limited Release, laut eBay „restricted and not open
+  to new users at this time".
+- Die **Browse API liefert nur laufende Angebote**, also Wunschpreise.
+- Heute holt `research._suche()` die verkauften Artikel per
+  `&LH_Sold=1&LH_Complete=1` über die normale Suchseite — kostenlos. Der Echtlauf
+  vom 2026-08-01 bildete den Preis aus **23 verkauften Artikeln**.
+  `compose._preisquelle()` bevorzugt sie ausdrücklich und warnt bei laufenden
+  Angeboten, man solle „im Zweifel etwas darunter bleiben". Ein Umstieg auf die
+  API verschlechtert die Preisqualität messbar.
+
+**3. Browse-API-Limit: knapp, aber lösbar.** 5.000 Calls/Tag, **anwendungsweit**
+(nicht pro Nutzer). Erhöhung über den Application Growth Check, kostenlos. Der
+Cache-Vorschlag ist richtig — und lohnt sich unabhängig von der API-Frage auch
+für die heutige Suche.
+
+**4. Fotos: lösbar, aber Mehrarbeit.** `imageUrls` verlangt öffentlich
+erreichbare **HTTPS**-URLs. Entweder selbst hosten oder über die **Media API**
+(`createImageFromFile`) hochladen. Wichtig: `UploadSiteHostedPictures` der
+Trading API wird **am 30.09.2026 abgeschaltet** — falls überhaupt, gleich die
+Media API nehmen.
+
+**5. Anzeigentarif 2 %: ungeklärt.** Promoted Listings laufen über die
+Marketing-API und setzen üblicherweise ein veröffentlichtes Angebot voraus.
+
+**Am eingeloggten Developer-Konto selbst geprüft (2026-08-02):**
+
+- Konto `samekili9`, Typ **Individual**, API-Lizenz seit 30.07.2026. Ein
+  Individual-Konto macht die Freigabe einer Limited-Release-API noch
+  unwahrscheinlicher — die gehen an Geschäftspartner.
+- **Gegenprobe:** Die Doku zu `createOffer` (Inventory API) lädt für dieses
+  Konto normal. Die Doku zu `createItemDraft` (Listing API) **leitet auf
+  `/develop` um** — nicht zugänglich. Das ist ein Direktbeleg, dass die einzige
+  API, die echte Portal-Entwürfe erzeugt, hier nicht freigeschaltet ist.
+- Die `createOffer`-Doku bestätigt Punkt 1 wörtlich: *„this call only stages an
+  offer for publishing. The seller must run the publishOffer call to convert the
+  offer to an **active eBay listing**."* — es gibt dazwischen keinen Entwurf.
+
+**Was über die Inventory API dagegen sauber ginge** (aus der Doku gelesen):
+
+- `format: FIXED_PRICE` — Sofort-Kaufen ist ein Feld, kein Glücksfall wie heute
+- `bestOfferTerms.bestOfferEnabled` — Preisvorschläge
+- `shippingCostOverrides` — die drei Versandstufen als eigener Betrag je Angebot
+- `returnPolicyId` / `fulfillmentPolicyId` / `paymentPolicyId` — Rücknahme,
+  Versand und Zahlung kommen aus **einmal angelegten Business Policies** im
+  eBay-Konto statt aus 20 Formularklicks je Inserat. Das wäre ein echter Gewinn:
+  die 14-Tage-/Käufer-zahlt-Regel stünde an einer Stelle statt in jedem Entwurf.
+- OAuth: `sell.inventory` im Authorization-Code-Flow, also mit einmaliger
+  Zustimmung des Nutzers.
+
+### Fazit
+
+Ein vollständiger Umstieg kostet nichts, nimmt aber zwei Dinge weg, die heute
+funktionieren: den prüfbaren Entwurf im Portal und die Preisbildung aus echten
+Verkäufen. Der Sinn der Empfehlung — Skalierung ohne CAPTCHA-Risiko — bleibt
+richtig; der vorgeschlagene Weg dorthin trägt nicht.
+
+Offene Entscheidung des Nutzers: heutigen Ablauf behalten, oder auf
+„API legt Offer an → Freigabe über eigenes Kommando (`publishOffer`) statt über
+das Portal" umstellen. Letzteres wäre sogar **sicherer** als der Browser, weil
+Veröffentlichen dann ein bewusster, eigener Aufruf ist statt eines Klicks neben
+dem Veröffentlichen-Knopf — kostet aber den Portal-Entwurf.
+
 **Zu bedenken beim neuen Repository:** Diese Datei und `CLAUDE.md` wandern mit,
 die Claude-Erinnerungen unter
 `~/.claude/projects/-Users-ogulcang-Auto-Listing/memory/` jedoch **nicht** —
