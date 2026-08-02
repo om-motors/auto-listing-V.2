@@ -551,6 +551,43 @@ Marketing-API und setzen üblicherweise ein veröffentlichtes Angebot voraus.
 - OAuth: `sell.inventory` im Authorization-Code-Flow, also mit einmaliger
   Zustimmung des Nutzers.
 
+### Option 1 (Business Policies) — am Konto geprüft, derzeit nicht machbar
+
+Der Nutzer hat sich am 2026-08-02 für Option 1 entschieden. Bestandsaufnahme am
+eingeloggten eBay-Konto (rein lesend, nichts angeklickt):
+
+| geprüft | Ergebnis |
+|---|---|
+| `bizpolicy.ebay.de/businesspolicy/manage` | „Something went wrong on our end" |
+| `bizpolicy.ebay.de/businesspolicy/optin` | dito |
+| `ebay.de/sh/acc/policies`, `ebay.de/bpm` | Fehlerseite |
+| `ebay.de/sh/ovw` (Verkäufer-Cockpit) | leitet auf `/sh/landing` = noch nicht aktiviert |
+| Menü „Verkaufen" in Mein eBay | Übersicht, Artikel verkaufen, Entwürfe, Geplant, Aktiv, Bestellungen, Inaktiv, Zahlungen, Versandetiketten — **kein Eintrag „Verkaufsvorlagen"** |
+| Verkäuferportal | Segment **„Ich verkaufe privat"** |
+| Konto | 0 aktive Angebote, Bewertungspunktestand 11 |
+
+**Befund:** Die Verkaufsvorlagen-Oberfläche existiert erst, wenn das Konto dafür
+freigeschaltet ist — laut eBay-Hilfe bekommen private Verkäufer das
+Verkäufer-Cockpit Pro erst **nach mindestens einem Verkauf**, gewerbliche
+automatisch. Das Konto ist als **privat** geführt und hat noch keine aktiven
+Angebote. Deshalb laufen alle Pfade ins Leere.
+
+**Nicht belegt:** ob Verkaufsvorlagen auf eBay.de grundsätzlich gewerbliche
+Verkäufer voraussetzen. Die Suche gab dazu nichts Eindeutiges her — nicht als
+Tatsache behandeln.
+
+**Guter Nebenbefund für die Planung:** Das Ziel sind 4.000 Angebote bis
+März 2027, das Konto ist aber privat und hat 0 aktive Angebote. Ein gewerbliches
+Konto würde diese Werkzeuge sehr wahrscheinlich freischalten und ist bei dieser
+Größenordnung in Deutschland ohnehin das Thema (Impressum, Widerrufsrecht,
+Gewährleistung). Das ist eine Beobachtung, keine Rechtsberatung — gehört vor den
+Steuerberater, nicht in dieses Repository.
+
+**Nächster sinnvoller Schritt, solange das offen ist:** die zwei Fehlalarme aus
+dem Trockenlauf (Preis, Merkmal „Hersteller") gegen das Formular nachweisen. Die
+Behebung — Kontrollen lesen bis zu dreimal mit Pause — ist eingebaut, aber noch
+unbewiesen.
+
 ### Fazit
 
 Ein vollständiger Umstieg kostet nichts, nimmt aber zwei Dinge weg, die heute
