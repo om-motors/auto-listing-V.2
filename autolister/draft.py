@@ -712,11 +712,20 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         try:
             gefunden = page.evaluate(
                 """() => {
-                  // Frisch hochgeladene Fotos hängen zunächst als blob:-URL im
-                  // Vorschaufeld; erst nach dem Speichern werden daraus
-                  // ebayimg-Adressen. Wer nur auf 'ebayimg' zählt, sieht direkt
-                  // nach dem Upload null Bilder — das war der Fehlalarm
-                  // "0 Vorschaubilder gefunden" vom 2026-08-02.
+                  // eBay führt über dem Fotofeld einen eigenen Zähler ("3/25").
+                  // Das ist das verlässlichste Signal: er kommt von eBay selbst
+                  // und überlebt jeden Umbau der Vorschaudarstellung.
+                  //
+                  // Die frühere Zählung von <img>-Elementen ging daneben — die
+                  // Vorschaubilder stecken weder als ebayimg- noch als
+                  // blob:-Adresse in einem <img>. Der Trockenlauf vom
+                  // 2026-08-02 meldete deshalb "0 Vorschaubilder gefunden",
+                  // während im Formular sauber 3 von 25 standen.
+                  const treffer = (document.body.innerText || "")
+                                    .match(/\\b(\\d{1,2})\\s*\\/\\s*2[0-9]\\b/);
+                  if (treffer) return parseInt(treffer[1], 10);
+
+                  // Rückfallebene, falls eBay den Zähler einmal weglässt.
                   let n = 0;
                   for (const b of document.querySelectorAll('img')) {
                     const s = b.currentSrc || b.src || '';
@@ -796,12 +805,14 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         # Das Feld heißt je nach Formularzustand anders — mal "Beschreibung"
         # (aria-label), mal "description" (name). Deshalb mehrere Schreibweisen
         # prüfen statt einer.
-        roh = ""
-        for schluessel in werte:
-            if re.search(r"beschreib|description", schluessel, re.I):
-                roh = werte[schluessel]
-                if roh:
-                    break
+        # Nur Felder mit echtem Textinhalt: das Muster trifft sonst auch
+        # `descriptionEditorMode` — ein Schalter, der "false" liefert. Genau
+        # das meldete der Trockenlauf als "gelesen 'false'". Deshalb Schalter
+        # ausschließen und von den Treffern den längsten nehmen.
+        kandidaten = [w for s, w in werte.items()
+                      if re.search(r"beschreib|description", s, re.I)
+                      and w not in ("true", "false")]
+        roh = max(kandidaten, key=len) if kandidaten else ""
         if not roh:
             _LETZTE_ABWEICHUNG = ("kein gefülltes Beschreibungsfeld gefunden "
                                   "(vorhanden: %s)" % (", ".join(sorted(werte)[:12]) or "keine"))
