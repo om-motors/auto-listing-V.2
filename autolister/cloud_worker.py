@@ -50,7 +50,14 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
         # Eine vom Handy eingetippte Teilenummer wird wie ein Ordnername
         # behandelt — `partnumber.aus_vorgabe()` erkennt selbst, ob das
         # überhaupt nach einer Nummer aussieht.
-        name = (auftrag.get("bezeichnung") or "").strip() or ("cloud_" + kennung)
+        #
+        # Der Ersatzname darf dabei NICHT wie eine Teilenummer aussehen. Das
+        # frühere "cloud_<id>" tat genau das: aus "cloud_45c9d009" wurde
+        # "CLOUD45C9D009" — 13 Zeichen, sechs Ziffern, und damit eine gültige
+        # Vorgabe. Am 2026-08-02 lief ein Auftrag deshalb mit einer erfundenen
+        # Teilenummer los; gerettet hat es nur die eBay-Gegenprüfung.
+        # "Handy-Auftrag <id>" ist mit über 17 Zeichen sicher außerhalb.
+        name = (auftrag.get("bezeichnung") or "").strip() or ("Handy-Auftrag " + kennung)
 
         ergebnis = pipeline.verarbeite_gruppe(fotos, dry_run=dry_run, name=name)
 

@@ -12,6 +12,41 @@ Letzte Aktualisierung: 2026-08-01 (nach dem ersten Echtlauf)
 
 ---
 
+## Web-App läuft (2026-08-02, abends)
+
+Netlify + Supabase sind eingerichtet und getestet: Upload vom Handy →
+Supabase → Mac → eBay-Formular. Die Kette **funktioniert**.
+
+- Supabase-Projekt `dsjfxlxqskhcezmsvafx`, Seite auf `…listing-v2.netlify.app`
+- `cloud_worker --pruefen` meldet alles grün
+- Der Arbeiter läuft **noch nicht als Dienst** — bisher von Hand gestartet
+- Der alte Ordner-Watcher (`Eingang/`) läuft weiter parallel. Vor dem
+  Dauerbetrieb des Cloud-Arbeiters abschalten, sonst laufen zwei Wege nebeneinander.
+- **Das Browserprofil ist auf dem Testkonto `samekili9`.** Jeder Entwurf landet
+  dort, bis `python -m autolister.login` auf `om.motors` umgestellt wird.
+
+### Was der erste echte Auftrag vom Handy aufgedeckt hat
+
+Ein Audi-Schmutzfänger (`8T0853888`), 4 Fotos. Drei Fehler, alle behoben:
+
+1. **eBay fragt manchmal nach der Kategorie.** Bei den Sonnenblenden erkannte
+   es sie selbst und sprang ins Formular; beim Schmutzfänger erschien
+   `/sl/prelist/identify` mit „Geben Sie eine Kategorie für Ihren Artikel an".
+   Die Pipeline kannte die Seite nicht und lief in den Timeout.
+   → neuer Schritt `_kategorie_waehlen()`, nimmt eBays ersten eigenen Vorschlag.
+   **Mit einem einzigen Testteil war das nicht zu finden.**
+2. **Die Einstiegsschleife hing am gesperrten Knopf.** Sie suchte „Weiter" als
+   Teilstring, traf „Zum er*weiter*ten Verkaufsformular wechseln", und nahm nur
+   `.first` — der gesperrte Knopf beendete damit die Suche.
+   → verankerter Namensvergleich, und es wird über alle Treffer gegangen.
+3. **Der Ersatz-Auftragsname wurde als Teilenummer gelesen.** Aus
+   `cloud_45c9d009` wurde `CLOUD45C9D009` — 13 Zeichen, sechs Ziffern, formal
+   gültig. Nur die eBay-Gegenprüfung rettete den Lauf.
+   → heißt jetzt `Handy-Auftrag <id>`, über 17 Zeichen und damit außerhalb
+   jedes Teilenummernformats.
+
+---
+
 ## Aktueller Stand
 
 > ### ⚠️ Repository-Wechsel (2026-08-02)

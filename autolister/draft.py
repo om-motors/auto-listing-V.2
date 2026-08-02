@@ -669,6 +669,60 @@ def create_draft(listing: Dict, vision: Dict, description: str,
             browser.close()
 
 
+def _kategorie_waehlen(page, warnings: List[str]) -> bool:
+    """Die Kategorieabfrage auf `/sl/prelist/identify` beantworten.
+
+    eBay schiebt diese Seite **nur manchmal** ein: Findet es zum Titel keine
+    eindeutige Kategorie, fragt es nach ("Geben Sie eine Kategorie für Ihren
+    Artikel an"), sonst springt es direkt ins Formular. Deshalb fiel der
+    Schritt bei den Sonnenblenden-Testläufen nie auf — beim ersten echten
+    Auftrag vom Handy (Schmutzfänger, 2026-08-02) blieb der Lauf hier stehen
+    und meldete "Verkaufsformular wurde nicht erreicht".
+
+    Aufbau der Seite, am echten Formular ermittelt:
+
+        button.se-field-card__body   "Auto & Motorrad: Teile > … > Sonstige"
+                                     <- Empfehlungen, voller Pfad mit " > "
+        button.se-field-card__body   "Baby" / "Briefmarken" / …
+                                     <- Gesamtliste, nur ein Name
+        button                       "Fertig"
+
+    Beide Sorten tragen dieselbe Klasse. Unterschieden werden sie am `>` im
+    Text: nur die Empfehlungen enthalten den vollen Pfad. Genommen wird die
+    erste — das ist eBays eigener bester Vorschlag zum Titel.
+    """
+    if "/prelist/identify" not in (page.url or ""):
+        return False
+
+    karten = page.locator("button.se-field-card__body")
+    gewaehlt = ""
+    for i in range(min(karten.count(), 40)):
+        karte = karten.nth(i)
+        try:
+            text = " ".join((karte.inner_text(timeout=2000) or "").split())
+            if ">" not in text or not karte.is_visible():
+                continue
+        except Exception:
+            continue
+        if _safe_click(page, karte, warnings, "Kategorie wählen"):
+            gewaehlt = text
+            break
+
+    if not gewaehlt:
+        warnings.append("Kategorieauswahl: keine empfohlene Kategorie gefunden — "
+                        "im Entwurf von Hand setzen")
+        return False
+
+    page.wait_for_timeout(1500)
+    fertig = page.get_by_role(
+        "button", name=re.compile(r"^\s*Fertig\s*$", re.I)).first
+    if fertig.count():
+        _safe_click(page, fertig, warnings, "Kategorie übernehmen")
+        page.wait_for_timeout(2000)
+    log.info("Kategorie gewählt: %s", gewaehlt[:80])
+    return True
+
+
 def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                dry_run: bool = False) -> Dict:
     titel = listing["titel"]
@@ -684,19 +738,45 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
     page.keyboard.press("Enter")
     _settle(page)
 
-    # Ggf. "Weiter" / "Ohne Übereinstimmung fortfahren"
-    for label in ("Weiter", "Ohne Übereinstimmung fortfahren", "Weiter zum Angebot"):
-        btn = page.get_by_role("button", name=label, exact=False)
-        if btn.count() > 0 and btn.first.is_visible():
-            _safe_click(page, btn.first, warnings, "Einstieg '%s'" % label)
-            _settle(page)
+    # Ggf. "Weiter" / "Ohne Übereinstimmung fortfahren".
+    #
+    # Zwei Fallen, beide am 2026-08-02 im Echtbetrieb aufgelaufen:
+    #
+    # 1. `exact=False` ist eine Teilstringsuche. "Weiter" trifft damit auch
+    #    "Zum erWEITERten Verkaufsformular wechseln" — einen Knopf, der auf ein
+    #    ganz anderes Formular führt und den FORBIDDEN zu Recht sperrt.
+    # 2. Genommen wurde nur `.first`. Stand der gesperrte Knopf vorn, war die
+    #    Sache erledigt: der echte "Weiter"-Knopf wurde nie geklickt, und der
+    #    Lauf endete auf /sl/prelist/identify mit "Formular nicht erreicht".
+    #
+    # Deshalb: verankerter Namensvergleich und über ALLE Treffer gehen, bis
+    # einer sitzt. Ein gesperrter Knopf beendet die Suche nicht mehr.
+    EINSTIEG = ("Weiter", "Ohne Übereinstimmung fortfahren", "Weiter zum Angebot",
+                "Fortfahren", "Neues Angebot erstellen")
+    for label in EINSTIEG:
+        if "draftId" in page.url or "/lstng" in page.url:
+            break  # Formular ist schon da
+        knoepfe = page.get_by_role(
+            "button", name=re.compile(r"^\s*%s\s*$" % re.escape(label), re.I))
+        for i in range(min(knoepfe.count(), 5)):
+            btn = knoepfe.nth(i)
+            try:
+                if not btn.is_visible():
+                    continue
+            except Exception:
+                continue
+            if _safe_click(page, btn, warnings, "Einstieg '%s'" % label):
+                _settle(page)
+                break
 
-    # Warten bis das Verkaufsformular (mit draftId) geladen ist
-    deadline = time.time() + 30
+    # Warten bis das Verkaufsformular (mit draftId) geladen ist. Unterwegs kann
+    # eBay noch die Kategorieauswahl dazwischenschieben — siehe unten.
+    deadline = time.time() + 60
     while time.time() < deadline:
         _check_captcha(page)
         if "draftId" in page.url or "/lstng" in page.url:
             break
+        _kategorie_waehlen(page, warnings)
         page.wait_for_timeout(500)
     if "draftId" not in page.url and "/lstng" not in page.url:
         raise DraftError("Verkaufsformular wurde nicht erreicht (URL: %s)" % page.url)
