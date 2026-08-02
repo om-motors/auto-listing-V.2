@@ -186,7 +186,7 @@ def process_all(dry_run: bool = False) -> List[Path]:
 
             for produkt in fertig:
                 try:
-                    reports.append(_process_with_browser(page, produkt, dry_run))
+                    reports.append(_process_with_browser(page, produkt, dry_run)["bericht"])
                 except (draft.NotLoggedIn, draft.CaptchaBlocked) as exc:
                     # Beides betrifft die Sitzung, nicht das einzelne Produkt —
                     # die übrigen Produkte hätten dasselbe Problem.
@@ -204,7 +204,7 @@ def process_all(dry_run: bool = False) -> List[Path]:
     return reports
 
 
-def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Path:
+def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict:
     """Phase 2 für ein Produkt: Recherche, Entwurfsdaten, eBay-Entwurf."""
     vis = produkt.vision
     nr = vis["teilenummer_kompakt"]
@@ -256,14 +256,27 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Path
     result["beschreibung"] = description
     if dry_run:
         log.info("[%s] Trockenlauf — Fotos bleiben im Eingang", produkt.name)
-        return notify.write_report(vis, listing, res, result, produkt.photos)
-    return _finish(produkt, listing, res, result)
+        bericht = notify.write_report(vis, listing, res, result, produkt.photos)
+    else:
+        bericht = _finish(produkt, listing, res, result)
+    # Die Einzelteile mitgeben, damit der Cloud-Arbeiter sie nach Supabase
+    # zurückschreiben kann, ohne den Bericht wieder auseinanderzunehmen.
+    return {"bericht": bericht, "vision": vis, "listing": listing,
+            "result": result, "research": res}
 
 
-def process_group(photos: List[Path], dry_run: bool = False) -> Path:
-    """Ein einzelnes Produkt komplett verarbeiten (eigener Browser)."""
+def verarbeite_gruppe(photos: List[Path], dry_run: bool = False,
+                      name: Optional[str] = None) -> Dict:
+    """Ein Produkt verarbeiten und **alle** Ergebnisteile zurückgeben.
+
+    Liefert {bericht, vision, listing, result, research}. `process_group` ist
+    die schmale Fassung davon und gibt nur den Berichtspfad zurück — der
+    Cloud-Arbeiter braucht dagegen Titel, Preis und Entwurfsadresse einzeln,
+    um sie nach Supabase zurückzuschreiben.
+    """
     config.ensure_dirs()
-    produkt = _analyze(Produkt(photos=photos, name=photos[0].parent.name or "produkt"))
+    produkt = _analyze(Produkt(
+        photos=photos, name=name or photos[0].parent.name or "produkt"))
     if produkt.error:
         raise produkt.error
     with sync_playwright() as p:
@@ -273,6 +286,11 @@ def process_group(photos: List[Path], dry_run: bool = False) -> Path:
             return _process_with_browser(page, produkt, dry_run)
         finally:
             browser.close()
+
+
+def process_group(photos: List[Path], dry_run: bool = False) -> Path:
+    """Ein einzelnes Produkt komplett verarbeiten (eigener Browser)."""
+    return verarbeite_gruppe(photos, dry_run)["bericht"]
 
 
 def main() -> None:

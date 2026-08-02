@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>Auto-Listing — Fotos hochladen</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --karte: #fff; --text: #14181d; --leise: #667085;
+    --rand: #dfe3e8; --akzent: #1f6feb; --akzent-text: #fff;
+    --ok: #0f7b3d; --warn: #a15c00; --fehler: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --karte: #171b21; --text: #e8eaed; --leise: #98a2b3;
+      --rand: #2a3039; --akzent: #4d8ef7; --akzent-text: #0b0e12;
+      --ok: #4ac97e; --warn: #e0a33e; --fehler: #f97066;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px
+             max(24px, env(safe-area-inset-bottom));
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .unterzeile { color: var(--leise); font-size: 0.9rem; margin: 0 0 20px; }
+  .karte {
+    background: var(--karte); border: 1px solid var(--rand);
+    border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  }
+  label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
+  .hinweis { color: var(--leise); font-size: 0.82rem; margin: 6px 0 0; }
+  input[type=email], input[type=password], input[type=text] {
+    width: 100%; padding: 13px 12px; font-size: 16px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--rand); border-radius: 10px;
+  }
+  input[type=file] { width: 100%; font-size: 15px; padding: 8px 0; color: var(--text); }
+  button {
+    width: 100%; padding: 15px; font-size: 16px; font-weight: 650;
+    border: 0; border-radius: 11px; background: var(--akzent);
+    color: var(--akzent-text); cursor: pointer; margin-top: 14px;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.leise {
+    background: transparent; color: var(--leise);
+    border: 1px solid var(--rand); font-weight: 500; padding: 10px;
+  }
+  .feld + .feld { margin-top: 16px; }
+  .verborgen { display: none !important; }
+  .meldung { padding: 12px 14px; border-radius: 10px; font-size: 0.9rem; margin-top: 14px; }
+  .meldung.fehler { background: color-mix(in srgb, var(--fehler) 14%, transparent); color: var(--fehler); }
+  .meldung.ok     { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+  .balken { height: 6px; background: var(--rand); border-radius: 3px; overflow: hidden; margin-top: 14px; }
+  .balken > div { height: 100%; width: 0; background: var(--akzent); transition: width 0.25s; }
+  .auftrag { border-top: 1px solid var(--rand); padding: 14px 0; }
+  .auftrag:first-of-type { border-top: 0; padding-top: 4px; }
+  .auftrag h3 { margin: 0 0 4px; font-size: 0.98rem; font-weight: 620; }
+  .auftrag p { margin: 2px 0; font-size: 0.86rem; color: var(--leise); }
+  .status { display: inline-block; font-size: 0.74rem; font-weight: 700;
+            padding: 3px 9px; border-radius: 999px; text-transform: uppercase;
+            letter-spacing: 0.03em; }
+  .status.neu    { background: color-mix(in srgb, var(--leise) 18%, transparent); color: var(--leise); }
+  .status.laeuft { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .status.fertig { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .status.fehler { background: color-mix(in srgb, var(--fehler) 18%, transparent); color: var(--fehler); }
+  a { color: var(--akzent); }
+  ul.punkte { margin: 6px 0 0; padding-left: 18px; font-size: 0.84rem; color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Auto-Listing</h1>
+  <p class="unterzeile">Fotos hochladen — den Rest macht der Mac.</p>
+
+  <!-- ------------------------------------------------------ Anmeldung -->
+  <section id="anmeldung" class="karte verborgen">
+    <div class="feld">
+      <label for="email">E-Mail</label>
+      <input id="email" type="email" autocomplete="username" inputmode="email">
+    </div>
+    <div class="feld">
+      <label for="passwort">Passwort</label>
+      <input id="passwort" type="password" autocomplete="current-password">
+    </div>
+    <button id="anmelden">Anmelden</button>
+    <div id="anmeldefehler" class="meldung fehler verborgen"></div>
+    <p class="hinweis">
+      Das Konto legst du einmalig in Supabase an (Authentication → Users).
+      Ohne Anmeldung kann niemand hochladen, der die Adresse dieser Seite kennt.
+    </p>
+  </section>
+
+  <!-- --------------------------------------------------------- Upload -->
+  <section id="upload" class="karte verborgen">
+    <div class="feld">
+      <label for="fotos">Fotos vom Teil</label>
+      <input id="fotos" type="file" accept="image/*" multiple>
+      <p class="hinweis">
+        Mindestens ein Foto der eingestanzten Teilenummer — möglichst scharf und
+        formatfüllend. Die Bilder werden in Originalgröße übertragen, weil die
+        Texterkennung an verkleinerten Fotos nachweislich scheitert.
+      </p>
+    </div>
+    <div class="feld">
+      <label for="bezeichnung">Teilenummer (optional)</label>
+      <input id="bezeichnung" type="text" inputmode="latin"
+             placeholder="z. B. 8K0857552 — leer lassen, wenn unbekannt">
+      <p class="hinweis">
+        Wenn du die Nummer kennst, trag sie ein: dann wird sie direkt verwendet,
+        statt sie aus dem Foto zu lesen.
+      </p>
+    </div>
+    <button id="absenden">Hochladen</button>
+    <div class="balken verborgen" id="balken"><div></div></div>
+    <div id="uploadmeldung" class="meldung verborgen"></div>
+  </section>
+
+  <!-- -------------------------------------------------------- Aufträge -->
+  <section id="liste" class="karte verborgen">
+    <h2 style="font-size:1rem;margin:0 0 10px">Letzte Aufträge</h2>
+    <div id="auftraege"><p class="hinweis">Wird geladen …</p></div>
+    <button class="leise" id="abmelden">Abmelden</button>
+  </section>
+</main>
+
+<script src="config.js"></script>
+<script>
+// Die Zugangsdaten stehen in config.js — das ist die einzige Datei, die von
+// Hand ausgefüllt wird.
+const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.AUTOLISTING_CONFIG || {};
+
+const $ = (id) => document.getElementById(id);
+const zeigen    = (el, ja = true) => el.classList.toggle("verborgen", !ja);
+const SPEICHER  = "autolisting.sitzung";
+
+let sitzung = null;
+try { sitzung = JSON.parse(localStorage.getItem(SPEICHER) || "null"); } catch { }
+
+// --------------------------------------------------------------- Supabase --
+
+async function api(pfad, optionen = {}) {
+  const kopf = {
+    apikey: SUPABASE_ANON_KEY,
+    ...(optionen.headers || {}),
+  };
+  if (sitzung?.access_token) kopf.Authorization = "Bearer " + sitzung.access_token;
+  const antwort = await fetch(SUPABASE_URL + pfad, { ...optionen, headers: kopf });
+  if (!antwort.ok) {
+    let text = await antwort.text();
+    try { text = JSON.parse(text).message || JSON.parse(text).msg || text; } catch { }
+    throw new Error(text || ("HTTP " + antwort.status));
+  }
+  return antwort.status === 204 ? null : antwort.json().catch(() => null);
+}
+
+async function anmelden(email, passwort) {
+  const antwort = await fetch(
+    SUPABASE_URL + "/auth/v1/token?grant_type=password",
+    {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: passwort }),
+    });
+  const daten = await antwort.json();
+  if (!antwort.ok) throw new Error(daten.error_description || daten.msg || "Anmeldung fehlgeschlagen");
+  sitzung = daten;
+  localStorage.setItem(SPEICHER, JSON.stringify(daten));
+}
+
+function abmelden() {
+  sitzung = null;
+  localStorage.removeItem(SPEICHER);
+  oberflaeche();
+}
+
+// ----------------------------------------------------------------- Upload --
+
+async function hochladen() {
+  const dateien = [...$("fotos").files];
+  const meldung = $("uploadmeldung");
+  zeigen(meldung, false);
+
+  if (!dateien.length) {
+    meldung.className = "meldung fehler";
+    meldung.textContent = "Bitte mindestens ein Foto auswählen.";
+    return zeigen(meldung, true);
+  }
+
+  $("absenden").disabled = true;
+  const balken = $("balken");
+  const fuellung = balken.firstElementChild;
+  zeigen(balken, true);
+  fuellung.style.width = "0%";
+
+  // Ein Ordner je Auftrag. Der Zeitstempel macht ihn eindeutig und lesbar.
+  const stempel = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const ordner  = "auftrag-" + stempel;
+  const pfade   = [];
+
+  try {
+    for (let i = 0; i < dateien.length; i++) {
+      const datei = dateien[i];
+      // Dateinamen entschärfen: Umlaute und Leerzeichen mag der Storage nicht.
+      const sauber = datei.name.replace(/[^A-Za-z0-9._-]/g, "_");
+      const pfad = `${ordner}/${String(i + 1).padStart(2, "0")}_${sauber}`;
+      await api("/storage/v1/object/fotos/" + encodeURI(pfad), {
+        method: "POST",
+        headers: { "Content-Type": datei.type || "application/octet-stream" },
+        body: datei,
+      });
+      pfade.push(pfad);
+      fuellung.style.width = Math.round(((i + 1) / dateien.length) * 100) + "%";
+    }
+
+    await api("/rest/v1/auftraege", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({
+        bezeichnung: $("bezeichnung").value.trim() || null,
+        fotos: pfade,
+      }),
+    });
+
+    meldung.className = "meldung ok";
+    meldung.textContent =
+      `${pfade.length} Foto(s) übertragen. Der Mac holt den Auftrag ab, sobald er läuft.`;
+    zeigen(meldung, true);
+    $("fotos").value = "";
+    $("bezeichnung").value = "";
+    auftraegeLaden();
+  } catch (fehler) {
+    meldung.className = "meldung fehler";
+    meldung.textContent = "Upload fehlgeschlagen: " + fehler.message;
+    zeigen(meldung, true);
+  } finally {
+    $("absenden").disabled = false;
+    setTimeout(() => zeigen(balken, false), 900);
+  }
+}
+
+// --------------------------------------------------------------- Aufträge --
+
+function zeitText(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString("de-DE",
+    { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+async function auftraegeLaden() {
+  const ziel = $("auftraege");
+  try {
+    const zeilen = await api(
+      "/rest/v1/auftraege?select=*&order=erstellt_am.desc&limit=15");
+    if (!zeilen || !zeilen.length) {
+      ziel.innerHTML = '<p class="hinweis">Noch keine Aufträge.</p>';
+      return;
+    }
+    ziel.innerHTML = zeilen.map((a) => {
+      const teile = [`<span class="status ${a.status}">${a.status}</span>`];
+      if (a.preis) teile.push(`${Number(a.preis).toFixed(2).replace(".", ",")} €`);
+      if (a.versandstufe) teile.push(`Versand ${a.versandstufe}`);
+      const punkte = (a.offene_punkte || []).length
+        ? `<ul class="punkte">${a.offene_punkte.map(
+             (p) => `<li>${entschaerfen(p)}</li>`).join("")}</ul>`
+        : "";
+      return `<div class="auftrag">
+        <h3>${entschaerfen(a.titel || a.bezeichnung || "(ohne Bezeichnung)")}</h3>
+        <p>${teile.join(" · ")}</p>
+        <p>${a.fotos.length} Foto(s) · ${zeitText(a.erstellt_am)}</p>
+        ${a.entwurf_url ? `<p><a href="${a.entwurf_url}" target="_blank"
+             rel="noopener">Entwurf bei eBay öffnen</a></p>` : ""}
+        ${a.fehler ? `<p style="color:var(--fehler)">${entschaerfen(a.fehler)}</p>` : ""}
+        ${punkte}
+      </div>`;
+    }).join("");
+  } catch (fehler) {
+    if (/JWT|token|401/i.test(fehler.message)) return abmelden();
+    ziel.innerHTML = `<p class="hinweis">Konnte nicht laden: ${entschaerfen(fehler.message)}</p>`;
+  }
+}
+
+// Text aus der Datenbank landet im HTML — deshalb vorher entschärfen.
+function entschaerfen(s) {
+  return String(s ?? "").replace(/[&<>"']/g,
+    (z) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[z]));
+}
+
+// ---------------------------------------------------------------- Ablauf ---
+
+function oberflaeche() {
+  const drin = !!sitzung?.access_token;
+  zeigen($("anmeldung"), !drin);
+  zeigen($("upload"), drin);
+  zeigen($("liste"), drin);
+  if (drin) auftraegeLaden();
+}
+
+$("anmelden").onclick = async () => {
+  const fehlerfeld = $("anmeldefehler");
+  zeigen(fehlerfeld, false);
+  $("anmelden").disabled = true;
+  try {
+    await anmelden($("email").value.trim(), $("passwort").value);
+    $("passwort").value = "";
+    oberflaeche();
+  } catch (fehler) {
+    fehlerfeld.textContent = fehler.message;
+    zeigen(fehlerfeld, true);
+  } finally {
+    $("anmelden").disabled = false;
+  }
+};
+
+$("passwort").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("anmelden").click();
+});
+$("absenden").onclick = hochladen;
+$("abmelden").onclick = abmelden;
+
+// Solange etwas läuft, alle 20 s nachsehen — das Handy zeigt so von selbst,
+// wenn der Entwurf fertig ist.
+setInterval(() => { if (sitzung?.access_token) auftraegeLaden(); }, 20000);
+
+oberflaeche();
+</script>
+</body>
+</html>

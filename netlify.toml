@@ -1,0 +1,28 @@
+# Netlify-Konfiguration für die Upload-Seite.
+#
+# Es wird nichts gebaut und nichts installiert — die Seite ist eine einzige
+# HTML-Datei ohne Abhängigkeiten. Netlify liefert sie einfach aus.
+
+[build]
+  publish = "web"
+  command = ""
+
+# Sicherheitskopfzeilen. Die Seite lädt nichts von fremden Servern und spricht
+# ausschließlich mit Supabase — genau das erlaubt die Richtlinie unten, und
+# sonst nichts.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "geolocation=(), microphone=(), payment=()"
+    Content-Security-Policy = """
+      default-src 'none'; \
+      img-src 'self' data: blob:; \
+      style-src 'self' 'unsafe-inline'; \
+      script-src 'self' 'unsafe-inline'; \
+      connect-src 'self' https://*.supabase.co; \
+      base-uri 'none'; \
+      form-action 'none'; \
+      frame-ancestors 'none'"""

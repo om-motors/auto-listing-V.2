@@ -144,6 +144,13 @@ def _safe_click(page, locator, warnings: List[str], step: str) -> bool:
         return False
 
 
+# Was die letzte fehlgeschlagene Kontrolle tatsächlich gelesen hat. `_step`
+# hängt es an die Warnung, damit im Bericht steht, ob ein Wert falsch war oder
+# das Feld gar nicht gefunden wurde. Ein Modulwert genügt: die Browser-Phase
+# läuft bewusst seriell (siehe pipeline.py), es gibt hier keine Nebenläufigkeit.
+_LETZTE_ABWEICHUNG = ""
+
+
 def _step(warnings: List[str], name: str, fn, pruefen=None) -> bool:
     """Einen Formularschritt ausführen und das Ergebnis nachkontrollieren.
 
@@ -162,10 +169,19 @@ def _step(warnings: List[str], name: str, fn, pruefen=None) -> bool:
 
     if pruefen is None:
         return True
+    global _LETZTE_ABWEICHUNG
+    _LETZTE_ABWEICHUNG = ""
     try:
         if pruefen():
             return True
-        warnings.append("%s: kein Fehler, aber der Wert steht nicht im Formular" % name)
+        # Warum das Detail wichtig ist: "der Wert steht nicht im Formular" allein
+        # sagt nicht, ob der Wert falsch war oder das Feld gar nicht gefunden
+        # wurde. Ohne diesen Unterschied wurde am 2026-08-02 zweimal am falschen
+        # Ende repariert — die Werte standen sauber im Entwurf, nur die Kontrolle
+        # las ins Leere.
+        warnings.append("%s: kein Fehler, aber der Wert steht nicht im Formular%s"
+                        % (name, " [%s]" % _LETZTE_ABWEICHUNG
+                           if _LETZTE_ABWEICHUNG else ""))
     except Exception as exc:
         warnings.append("%s: Kontrolle fehlgeschlagen (%s)" % (name, str(exc).splitlines()[0]))
     return False
@@ -234,11 +250,18 @@ def _formularwerte(page) -> Dict[str, str]:
         return page.evaluate("""() => {
           const out = {};
           for (const el of document.querySelectorAll('input, select, textarea')) {
-            const name = el.getAttribute('name') || el.getAttribute('aria-label');
-            if (!name) continue;
             const schalter = el.type === 'checkbox'
                              || el.getAttribute('role') === 'switch';
-            out[name] = schalter ? String(el.checked) : String(el.value ?? '');
+            const wert = schalter ? String(el.checked) : String(el.value ?? '');
+            // Unter JEDEM Namen ablegen, den das Element trägt. eBay rendert
+            // ein frisch angelegtes Formular anders als ein nachgeladenes:
+            // mal steht die Bezeichnung in `name`, mal nur im `aria-label`.
+            // Genau daran scheiterten am 2026-08-02 die Kontrollen für Preis
+            // und Beschreibung — die Werte standen sauber im Entwurf, nur
+            // unter einem anderen Schlüssel, als die Kontrolle suchte.
+            for (const s of [el.getAttribute('name'), el.getAttribute('aria-label')]) {
+              if (s && !(s in out)) out[s] = wert;
+            }
           }
           return out;
         }""") or {}
@@ -263,13 +286,28 @@ def _felder_stimmen(page, **erwartet: str) -> bool:
     #
     # Geduld macht die Kontrolle genauer, nicht durchlässiger: ein Wert, der
     # gar nicht gesetzt wurde, erscheint auch nach dem dritten Versuch nicht.
+    global _LETZTE_ABWEICHUNG
+    abweichung = ""
     for versuch in range(3):
         werte = _formularwerte(page)
-        if all(werte.get(feld, "\x00").strip() == wert
-               for feld, wert in erwartet.items()):
+        fehler = []
+        for feld, soll in erwartet.items():
+            if feld not in werte:
+                # Die vorhandenen Schlüssel mitgeben: ohne sie sagt "Feld nicht
+                # gefunden" nicht, ob es fehlt oder nur anders heißt.
+                vorhanden = ", ".join(sorted(werte)[:12]) or "keine"
+                fehler.append("%s: Feld war nicht im Formular (gefunden: %s)"
+                              % (feld, vorhanden))
+            elif werte[feld].strip() != soll:
+                fehler.append("%s: erwartet %r, gelesen %r"
+                              % (feld, soll, werte[feld].strip()[:40]))
+        if not fehler:
+            _LETZTE_ABWEICHUNG = ""
             return True
+        abweichung = "; ".join(fehler)
         if versuch < 2:
             page.wait_for_timeout(1200)
+    _LETZTE_ABWEICHUNG = abweichung
     return False
 
 
@@ -654,8 +692,15 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         # auf die Vorschaubilder warten statt pauschal pro Foto zu schlafen
         try:
             page.wait_for_function(
-                "n => document.querySelectorAll('img[src*=\"ebayimg\"],"
-                " [class*=\"uploader\"] img').length >= n",
+                """n => {
+                  let z = 0;
+                  for (const b of document.querySelectorAll('img')) {
+                    const s = b.currentSrc || b.src || '';
+                    if (s.startsWith('blob:') || s.startsWith('data:')
+                        || s.includes('ebayimg')) z++;
+                  }
+                  return z >= n;
+                }""",
                 arg=len(photos), timeout=90000)
         except Exception:
             _settle(page, 20000)
@@ -663,12 +708,30 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         # Die Wartefunktion oben schluckt ihren eigenen Timeout — ohne diese
         # Kontrolle galt der Upload als erledigt, auch wenn kein einziges Bild
         # ankam.
+        global _LETZTE_ABWEICHUNG
         try:
             gefunden = page.evaluate(
-                "() => document.querySelectorAll('img[src*=\"ebayimg\"],"
-                " [class*=\"uploader\"] img').length")
-            return int(gefunden) >= len(photos)
-        except Exception:
+                """() => {
+                  // Frisch hochgeladene Fotos hängen zunächst als blob:-URL im
+                  // Vorschaufeld; erst nach dem Speichern werden daraus
+                  // ebayimg-Adressen. Wer nur auf 'ebayimg' zählt, sieht direkt
+                  // nach dem Upload null Bilder — das war der Fehlalarm
+                  // "0 Vorschaubilder gefunden" vom 2026-08-02.
+                  let n = 0;
+                  for (const b of document.querySelectorAll('img')) {
+                    const s = b.currentSrc || b.src || '';
+                    if (s.startsWith('blob:') || s.startsWith('data:')
+                        || s.includes('ebayimg')) n++;
+                  }
+                  return n;
+                }""")
+            if int(gefunden) >= len(photos):
+                return True
+            _LETZTE_ABWEICHUNG = ("%d Vorschaubilder gefunden, %d erwartet"
+                                  % (int(gefunden), len(photos)))
+            return False
+        except Exception as exc:
+            _LETZTE_ABWEICHUNG = "Zählung fehlgeschlagen: %s" % str(exc).splitlines()[0]
             return False
     if photos:
         _step(warnings, "Foto-Upload", upload_photos, upload_kontrolle)
@@ -728,10 +791,27 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
     def beschreibung_kontrolle():
         # Der Editorinhalt landet in textarea[name="Beschreibung"] — mit
         # HTML-Auszeichnung, deshalb vor dem Vergleich die Tags herausnehmen.
-        roh = _formularwerte(page).get("Beschreibung", "")
+        global _LETZTE_ABWEICHUNG
+        werte = _formularwerte(page)
+        # Das Feld heißt je nach Formularzustand anders — mal "Beschreibung"
+        # (aria-label), mal "description" (name). Deshalb mehrere Schreibweisen
+        # prüfen statt einer.
+        roh = ""
+        for schluessel in werte:
+            if re.search(r"beschreib|description", schluessel, re.I):
+                roh = werte[schluessel]
+                if roh:
+                    break
+        if not roh:
+            _LETZTE_ABWEICHUNG = ("kein gefülltes Beschreibungsfeld gefunden "
+                                  "(vorhanden: %s)" % (", ".join(sorted(werte)[:12]) or "keine"))
+            return False
         klar = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", roh)).strip().lower()
         probe = re.sub(r"\s+", " ", description).strip().lower()[:30]
-        return bool(probe) and probe in klar
+        if bool(probe) and probe in klar:
+            return True
+        _LETZTE_ABWEICHUNG = "gesucht %r, gelesen %r" % (probe, klar[:60])
+        return False
     _step(warnings, "Beschreibung", set_description, beschreibung_kontrolle)
 
     # --- Artikelmerkmale ---
@@ -756,13 +836,18 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             # Erst das Ergebnis des Setzens, dann bis zu dreimal frisch
             # zurücklesen — beim Pflichtfeld "Hersteller" baut eBay die
             # Merkmalliste neu auf, der Wert steht kurz danach noch nicht da.
+            global _LETZTE_ABWEICHUNG
             if _gleich(gesetzte_werte.get(label, ""), value):
                 return True
+            gelesen = ""
             for versuch in range(3):
-                if _gleich(_merkmal_wert(page, label), value):
+                gelesen = _merkmal_wert(page, label)
+                if _gleich(gelesen, value):
                     return True
                 if versuch < 2:
                     page.wait_for_timeout(1000)
+            _LETZTE_ABWEICHUNG = ("erwartet %r; beim Setzen %r, beim Zurücklesen %r"
+                                  % (value, gesetzte_werte.get(label, ""), gelesen))
             return False
         _step(warnings, "Merkmal '%s'" % label, set_specific, kontrolle)
 

@@ -123,7 +123,7 @@ Legende: ✅ = am Code selbst nachgeprüft · ❓ = aus dem abgebrochenen Lauf, 
 | **A3** | `FORBIDDEN` kennt „veröffentlichen", „aktivieren", „kostenpflichtig", „Gebühren", „publish", „list it/for free" | Testfälle |
 | **A5** | Speichern greift auf `button[aria-label='Speichern']`; der `.last`-Teilstring-Fallback ist weg | Selektor live verifiziert |
 | **A6** | Nach dem Speichern prüft `_ist_noch_entwurf()`, dass `draftId` steht und nichts online ging | — |
-| **B1/B2** | **12 von 12** Formularschritten haben eine Kontrolle (vorher 4). Nur der Screenshot braucht keine | AST-Prüfung |
+| **B1/B2** | **12 von 13** Formularschritten haben eine Kontrolle (vorher 4 von 11). Ohne ist nur der Screenshot — der braucht keine | AST-Prüfung |
 | **B3** | Anzeigentarif-Kontrolle liest `promotedListingSelection` + `customAdRateField`. Der Teilstring-Fehler („2 %" in „12 %") ist weg | Trockenlauf |
 | **B4** | Rücknahme-Kontrolle prüft alle drei: `returnPolicy`, `returnDuration`, `returnShippingPayer` | Trockenlauf |
 | **B5** | Die Rückfallebene, die sich am Nachbarfeld bestätigte, ist ersatzlos entfernt | Trockenlauf |

@@ -1,6 +1,7 @@
 """Berichte schreiben + macOS-Benachrichtigungen."""
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -44,6 +45,23 @@ def _ist_formularschritt(warnung: str) -> bool:
     return any(warnung.startswith(k) for k in SCHRITT_KLARTEXT)
 
 
+def _grund(warnung: str, schluessel: str) -> str:
+    """Den erklärenden Teil einer Warnung herausziehen.
+
+    Ohne ihn steht im Bericht nur „Fotos hochladen" — und niemand sieht, ob
+    wirklich kein Bild ankam oder ob bloß die Kontrolle ins Leere gelesen hat.
+    Genau dieser Unterschied hat am 2026-08-02 zwei Reparaturen am falschen
+    Ende gekostet: die Werte standen sauber im Entwurf, gemeldet wurde
+    trotzdem Handarbeit.
+    """
+    rest = warnung[len(schluessel):].lstrip(" :").strip()
+    klammer = re.search(r"\[(.+)\]\s*$", rest)
+    if klammer:
+        return klammer.group(1).strip()
+    return rest.replace(
+        "kein Fehler, aber der Wert steht nicht im Formular", "").strip(" —-–")
+
+
 def _offene_schritte(warnungen: List[str], listing: Dict) -> List[str]:
     """Fehlgeschlagene Formularschritte in verständliche Aufgaben übersetzen."""
     werte = {
@@ -61,9 +79,13 @@ def _offene_schritte(warnungen: List[str], listing: Dict) -> List[str]:
             if warnung.startswith(schluessel) and schluessel not in gesehen:
                 gesehen.add(schluessel)
                 try:
-                    offen.append(klartext % werte)
+                    eintrag = klartext % werte
                 except (KeyError, ValueError):
-                    offen.append(klartext)
+                    eintrag = klartext
+                grund = _grund(warnung, schluessel)
+                if grund:
+                    eintrag = "%s — %s" % (eintrag, grund[:170])
+                offen.append(eintrag)
                 break
     return offen
 

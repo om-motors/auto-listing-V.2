@@ -137,6 +137,25 @@ Alle Selektoren am echten Formular ermittelt und per Trockenlauf verifiziert.
   einstellen" — beide fängt `FORBIDDEN` ab.
 - **Foto-Upload:** direkt per `set_input_files()` in das `input[type=file]`.
 
+**Ein frisch angelegter Entwurf ist nicht derselbe wie ein nachgeladener**
+
+Das ist die teuerste Falle im ganzen Formular, und sie schlägt zweimal zu:
+
+- Der Wechsel-Dialog erscheint nur beim **frisch angelegten** Entwurf (siehe
+  oben) — deshalb blieb er bei der Selektor-Untersuchung unsichtbar.
+- **Dieselben Felder heißen unterschiedlich.** Am nachgeladenen Entwurf trägt
+  das Preisfeld nur `aria-label="Artikelpreis"` und kein `name`; am frisch
+  angelegten ist es umgekehrt. Kontrollen, die nur einen der beiden Wege
+  lesen, melden „Feld war nicht im Formular", obwohl der Wert sauber
+  drinsteht. Genau das kostete am 2026-08-02 drei Trockenläufe.
+  `_formularwerte()` legt jedes Feld deshalb **unter beiden** Schlüsseln ab.
+- Ebenso bei Fotos: direkt nach dem Upload hängen die Vorschaubilder als
+  `blob:`-URL im DOM, erst nach dem Speichern werden daraus `ebayimg`-Adressen.
+  Wer nur auf `ebayimg` zählt, sieht null Bilder.
+
+**Merke:** Selektoren und Kontrollen immer am *frisch angelegten* Entwurf
+prüfen, nie an einem nachgeladenen. Der nachgeladene lügt.
+
 **Artikelmerkmale — die vier Fallen**
 
 Aufbau einer Zeile: Beschriftung, sichtbarer Aufklapp-Knopf
