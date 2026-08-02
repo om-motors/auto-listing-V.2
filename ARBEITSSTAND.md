@@ -14,6 +14,21 @@ Letzte Aktualisierung: 2026-08-01 (nach dem ersten Echtlauf)
 
 ## Aktueller Stand
 
+> ### ⚠️ Repository-Wechsel (2026-08-02)
+>
+> Gearbeitet wird ab jetzt **ausschließlich** in
+> `git@github.com:om-motors/auto-listing-V.2.git`.
+>
+> Das alte Repository `om-motors/auto-listing` bleibt **unangetastet** — es ist
+> der eingefrorene Stand mit der funktionierenden, gehärteten
+> Browser-Automation. Es wurde als Git-Remote **entfernt**, damit kein Befehl
+> es versehentlich trifft. Nicht wieder hinzufügen, nicht dorthin pushen.
+>
+> Das Arbeitsverzeichnis bleibt bewusst `~/Auto-Listing`: daran hängen die
+> launchd-Dienste, die `.env`, das Browser-Profil mit dem eBay-Login, die
+> virtuelle Umgebung und die Claude-Erinnerungen. Ein Umzug würde alles davon
+> brechen.
+
 - Alles auf `main` (`f8cf98a`), lokal und auf GitHub gleichstand
 - **Der erste Echtlauf gegen das echte eBay-Formular ist gelaufen und war
   erfolgreich.** Details unten. Die Selektoren in `draft.py` sind damit erstmals
@@ -417,6 +432,57 @@ Wert prüft.
    aber gültiges Inserat, das niemand meldet.
 5. **B1 + B2** — die sieben kontrollfreien Schritte nachrüsten.
 6. **E1** — schneller Einzeiler, betrifft nur `api`/`cli`.
+
+---
+
+## Nächstes Vorhaben: eBay-Developer-APIs statt Browser-Automation
+
+**Verabredet für 2026-08-01, 20:15.** Der Nutzer legt dafür ein neues Repository
+an („Auto-Listing V.2" o. ä.). Ein eBay-Developer-Konto besteht bereits, und
+Chrome ist dort eingeloggt.
+
+**Auftrag:** prüfen, ob der Umstieg auf die eBay-APIs Sinn ergibt — unter der
+harten Randbedingung, dass das Programm **kostenlos** bleibt.
+
+Ausgangspunkt ist eine Empfehlung von Perplexity, die wir **nicht ungeprüft
+übernehmen**. Ihre Kernaussagen, jede als Prüfauftrag formuliert:
+
+1. *„Inventory API sofort für die Entwurfserstellung einsetzen. `createOffer`
+   erzeugt strukturell garantiert nur einen Entwurf."*
+   → **Wichtigster Punkt und größter Zweifel.** Ein per `createOffer` angelegtes
+   *unpublished Offer* ist nicht dasselbe wie ein **Entwurf im Verkäuferportal**
+   (`ebay.de/sh/lst/drafts`). Der gesamte heutige Arbeitsablauf des Nutzers hängt
+   daran, den Entwurf dort anzusehen und selbst freizugeben. Zu klären: Taucht
+   ein Offer ohne `publishOffer` in der Entwurfsliste auf? Wenn nein — wie sieht
+   der Freigabeschritt dann aus, und ist der für den Nutzer noch praktikabel?
+   Das entscheidet über das ganze Vorhaben, nicht die Technik.
+2. *„2 Mio. Calls/Tag für Inventory, 5.000/Tag für Browse."*
+   → Am Limit-Dokument gegenprüfen, nicht aus zweiter Hand übernehmen. Ebenso:
+   Braucht die Browse API eine gesonderte Freischaltung für den Produktivbetrieb?
+3. *„Kostenlos."* → Für die Nutzung ja, aber prüfen, ob Freischaltung,
+   Verifizierung oder Kontostatus Hürden sind.
+4. *„Cache für Vergleichspreise, 24–48 h."* → Sinnvoll und unabhängig von der
+   API-Frage; ließe sich auch für die heutige Suche in `research.py` einbauen.
+5. **Nicht erwähnt, aber offen:** Der Anzeigentarif von **2 %** („Angebot
+   bewerben") ist eine feste Vorgabe. Promoted Listings laufen über die
+   Marketing-API und typischerweise über *veröffentlichte* Angebote. Lässt sich
+   die Vorgabe über die API überhaupt vorbereiten, oder bliebe sie Handarbeit?
+6. **Ebenfalls offen:** Fotos. Der heutige Weg lädt sie direkt ins Formular. Über
+   die API braucht es vermutlich einen anderen Weg — prüfen.
+
+**Was unangetastet bleibt:** OCR, Teilenummer-Erkennung, Preisrechnung und die
+lokale Betriebsart. Die laufen kostenlos und lokal, dafür gibt es keinen
+sinnvollen API-Ersatz.
+
+**Empfohlenes Vorgehen:** erst die sechs Punkte klären, dann entscheiden. Kein
+Umbau, bevor Punkt 1 beantwortet ist — die Browser-Automation ist gerade erst
+gehärtet und funktioniert nachweislich.
+
+**Zu bedenken beim neuen Repository:** Diese Datei und `CLAUDE.md` wandern mit,
+die Claude-Erinnerungen unter
+`~/.claude/projects/-Users-ogulcang-Auto-Listing/memory/` jedoch **nicht** —
+die hängen am Verzeichnispfad. Bleibt das Arbeitsverzeichnis `~/Auto-Listing`,
+ist alles gut; wird es umbenannt, müssen sie mitkopiert werden.
 
 ---
 
