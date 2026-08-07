@@ -1,0 +1,28 @@
+{
+  // Upload-Seite für Auto-Listing auf Cloudflare Workers.
+  //
+  // Es gibt bewusst KEIN Worker-Skript ("main" fehlt): die Seite besteht aus
+  // zwei statischen Dateien in web/. Cloudflare liefert sie direkt aus, ohne
+  // Worker-Code auszuführen. Nichts zu bauen, nichts zu installieren.
+  //
+  // Veröffentlichen:
+  //     npx wrangler deploy
+  //
+  // Die Sicherheitskopfzeilen (CSP usw.) stehen in web/_headers — sie gehören
+  // in das Asset-Verzeichnis, nicht hierher.
+  "name": "auto-listing",
+  "compatibility_date": "2026-08-07",
+  "account_id": "9d9066dd6465d7e0821fc91e00670f23",
+
+  "assets": {
+    "directory": "./web",
+    // Keine Einzelseiten-App: es gibt genau eine index.html, und ein Aufruf
+    // einer unbekannten Adresse soll ehrlich 404 liefern statt still die
+    // Startseite zu zeigen.
+    "not_found_handling": "none"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

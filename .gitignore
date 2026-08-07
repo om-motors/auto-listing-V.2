@@ -13,3 +13,7 @@ graphify-out/
 .env
 __pycache__/
 *.pyc
+
+# Wrangler-Zwischenstände (lokaler Zustand, gehört nicht ins Repository)
+.wrangler/
+node_modules/

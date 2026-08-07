@@ -1,0 +1,16 @@
+# Sicherheitskopfzeilen für die Upload-Seite.
+#
+# Diese Datei gehört ins Asset-Verzeichnis, nicht in die wrangler.jsonc —
+# Cloudflare liest sie beim Ausliefern der statischen Dateien.
+#
+# Die Seite lädt nichts von fremden Servern und spricht ausschließlich mit
+# Supabase. Genau das erlaubt die Richtlinie unten, und sonst nichts. Wird
+# die Seite trotzdem irgendwann kompromittiert, kann sie die hochgeladenen
+# Fotos nirgendwo anders hinschicken.
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
+  Content-Security-Policy: default-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

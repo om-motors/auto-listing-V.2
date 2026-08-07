@@ -74,35 +74,35 @@ SUPABASE_SERVICE_KEY=hier der service_role- bzw. secret-Schlüssel
 > `config.js` schreibt, gibt jedem Besucher der Seite volle Rechte auf die
 > Datenbank. Die `.env` steht in `.gitignore` und wird nie mitversioniert.
 
-### 4. Seite veröffentlichen (Netlify)
+### 4. Seite veröffentlichen (Cloudflare Workers)
 
-**Add new project → Import an existing project → GitHub →**
-`om-motors/auto-listing-V.2`.
+**Die Seite läuft auf Cloudflare:**
+**https://auto-listing.o-guelues.workers.dev**
 
-Die Einstellungen stehen schon in [`netlify.toml`](netlify.toml):
+Neu veröffentlichen nach einer Änderung in `web/`:
 
-| Feld | Wert |
-|---|---|
-| Base directory | `web` |
-| Build command | *(leer)* |
-| Publish directory | `.` |
+```bash
+cd /Users/ogulcang/Auto-Listing && npx wrangler deploy
+```
 
-Es wird nichts gebaut und nichts installiert — die Seite ist eine einzige
-HTML-Datei ohne Fremdabhängigkeiten.
+Das ist alles. Kein Build, keine Installation — es gibt bewusst **kein
+Worker-Skript**: Die Einstellungen in [`wrangler.jsonc`](wrangler.jsonc) sagen
+Cloudflare nur, dass es die Dateien aus `web/` direkt ausliefern soll.
 
-> **Warum `base = web` und nicht einfach `publish = web`?** Netlify durchsucht
-> das Basisverzeichnis nach Paketlisten und installiert, was es findet. Zeigt
-> die Basis auf das Wurzelverzeichnis, stößt es auf die `requirements.txt` der
-> Pipeline und versucht, `pyobjc-framework-Vision` zu bauen — die
-> macOS-Texterkennung. Auf Netlifys Linux scheitert das zwangsläufig
-> (`/usr/bin/sw_vers` fehlt), und der Deploy bricht ab. Mit `base = web` sieht
-> Netlify nur die beiden Dateien, die es ausliefern soll.
->
-> Zusätzlich tragen die pyobjc-Zeilen in `requirements.txt` jetzt den Marker
-> `; sys_platform == "darwin"` — damit überspringt jede Installation auf Linux
-> sie von sich aus. Nach dem Deploy bekommst du eine Adresse
-wie `https://auto-listing-v2.netlify.app`. Die aufs Handy, zum Startbildschirm
-hinzufügen, fertig.
+Die Sicherheitskopfzeilen stehen in [`web/_headers`](web/_headers) — im
+Asset-Verzeichnis, nicht in der `wrangler.jsonc`. Sie erlauben der Seite,
+ausschließlich mit Supabase zu sprechen. Sollte sie je manipuliert werden,
+kann sie deine Fotos nirgendwo anders hinschicken.
+
+Adresse aufs Handy, in Safari **Teilen → Zum Home-Bildschirm**. Dann startet
+sie wie eine App.
+
+> **Netlify funktioniert weiterhin.** Die Konfiguration in
+> [`netlify.toml`](netlify.toml) bleibt liegen, falls du den Weg noch brauchst.
+> Dort ist `base = "web"` gesetzt — sonst findet Netlify die `requirements.txt`
+> der Pipeline und scheitert daran, `pyobjc-framework-Vision` auf Linux zu
+> bauen. Bei Cloudflare stellt sich die Frage nicht: dort wird gar nichts
+> installiert.
 
 ### 5. Selbsttest
 
