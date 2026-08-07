@@ -116,6 +116,29 @@ def _foto_alle_drehungen(foto: Path, arbeitsordner: Path,
     return gefunden
 
 
+def lies_fotos_einzeln(fotos: List[Path],
+                       gruendlich: bool = False) -> List[List[Tuple[str, float]]]:
+    """Wie `lies_fotos`, aber **je Foto getrennt**.
+
+    Die Zuordnung „welcher Text stand auf welchem Bild" wird ohnehin berechnet;
+    `lies_fotos` wirft sie beim Zusammenführen nur weg. Getrennt kostet sie
+    keine zusätzliche Erkennungszeit — und sie verrät, welches Foto die
+    Teilenummer zeigt. Genau das braucht die Fotoreihenfolge: die
+    Nahaufnahme des Aufklebers taugt nicht als Hauptbild.
+    """
+    if not verfuegbar():
+        raise RuntimeError(
+            "macOS-Texterkennung nicht verfügbar. Bitte installieren:\n"
+            "  .venv/bin/pip install pyobjc-framework-Vision pyobjc-framework-Quartz"
+        )
+    with tempfile.TemporaryDirectory(prefix="autolister-ocr-") as tmp:
+        ordner = Path(tmp)
+        arbeiter = min(4, max(1, len(fotos)))
+        with ThreadPoolExecutor(max_workers=arbeiter) as pool:
+            return list(pool.map(
+                lambda f: _foto_alle_drehungen(f, ordner, gruendlich), fotos))
+
+
 def lies_fotos(fotos: List[Path], gruendlich: bool = False) -> List[Tuple[str, float]]:
     """Alle Fotos lesen und sämtliche Textfunde zurückgeben.
 

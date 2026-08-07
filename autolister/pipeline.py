@@ -205,6 +205,32 @@ def process_all(dry_run: bool = False) -> List[Path]:
     return reports
 
 
+def _fotos_sortieren(photos: List[Path], vis: Dict) -> List[Path]:
+    """Fotos so ordnen, dass das schönste Bild zuerst hochgeladen wird.
+
+    **eBay macht das erste Foto zum Hauptbild** — und das ist das, was Käufer
+    in der Suchergebnisliste sehen. Eine Nahaufnahme des Typenschilds taugt
+    dafür nicht; gebraucht wird die Ansicht, auf der man das Teil erkennt.
+
+    Die Texterkennung weiß bereits, auf welchen Bildern die Teilenummer steht
+    (`_nummer_fotos`). Genau die wandern ans Ende. Die Reihenfolge innerhalb
+    beider Gruppen bleibt, wie sie war.
+
+    Zeigen *alle* Fotos die Nummer, wird nichts umsortiert — dann gibt es
+    keine bessere Wahl, und eine willkürliche Umstellung wäre nur Unruhe.
+    """
+    mit_nummer = set(vis.get("_nummer_fotos") or [])
+    if not mit_nummer:
+        return list(photos)
+    ohne = [p for p in photos if str(p) not in mit_nummer]
+    mit = [p for p in photos if str(p) in mit_nummer]
+    if not ohne:
+        return list(photos)
+    log.info("Fotoreihenfolge: %d Übersichtsbild(er) zuerst, %d mit Teilenummer "
+             "ans Ende", len(ohne), len(mit))
+    return ohne + mit
+
+
 def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict:
     """Phase 2 für ein Produkt: Recherche, Entwurfsdaten, eBay-Entwurf."""
     vis = produkt.vision
@@ -251,7 +277,8 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict
     listing["_marke"] = vis.get("hersteller")
     listing["_nummer"] = vis.get("teilenummer_kompakt")
 
-    upload_photos = images.prepare_for_upload(produkt.photos, produkt.work_dir)
+    upload_photos = images.prepare_for_upload(
+        _fotos_sortieren(produkt.photos, vis), produkt.work_dir)
     result = draft.create_draft_on_page(
         page, listing, vis, description, upload_photos, produkt.work_dir, dry_run)
     result["beschreibung"] = description

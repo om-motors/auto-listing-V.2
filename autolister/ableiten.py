@@ -82,11 +82,18 @@ VERSAND_STICHWOERTER = [
                    "auspuff", "endschalldämpfer", "endschalldaempfer")),
     ("Mittel", ("scheinwerfer", "spiegel", "rücklicht", "ruecklicht",
                 "verkleidung", "grill", "kühler", "kuehler", "lüfter",
-                "luefter", "airbag", "display", "steuergerät", "steuergeraet",
-                "pumpe", "kompressor", "lenkrad")),
+                "luefter", "airbag", "display", "kompressor", "lenkrad")),
+    # "steuergerät" stand bis 2026-08-07 unter "Mittel" (23,99 €). Ein
+    # Steuergerät passt aber in einen kleinen Karton, und die Vorgabe des
+    # Nutzers beschreibt Mittel als "Scheinwerfer, Spiegel, größere
+    # Verkleidungen". Aufgefallen ist es, als der Teilname 8K0907801J
+    # richtigerweise zu "Steuergerät Feststellbremse" wurde und der Versand
+    # dadurch von 7,69 € auf 23,99 € sprang — ohne dass sich am Teil etwas
+    # geändert hätte. Ebenso "pumpe": eine Wasserpumpe ist ein Handteil.
     ("Standard", ("halter", "sensor", "schalter", "clip", "leiste", "zierleiste",
                   "kappe", "deckel", "blende", "schraube", "dichtung", "relais",
-                  "stecker", "kabel", "griff", "düse", "duese")),
+                  "stecker", "kabel", "griff", "düse", "duese",
+                  "steuergerät", "steuergeraet", "pumpe", "ventil", "modul")),
 ]
 
 
@@ -123,6 +130,14 @@ def vergleichbare_angebote(angebote: List[Dict], teilenummer: str) -> List[int]:
     return passend
 
 
+# Wörter, die vor den eigentlichen Teilnamen gehören, wenn die Vergleichstitel
+# sie mittragen. Bewusst kurz gehalten und auf Gerätearten beschränkt: Wörter
+# wie „Halter" oder „Blende" hier aufzunehmen würde vor fast jedes Teil etwas
+# schreiben.
+GERAETEWOERTER = ("steuergerät", "steuergeraet", "sensor", "schalter",
+                  "relais", "pumpe", "ventil", "modul")
+
+
 def teilname(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
     """Häufigstes Sachwort in den Vergleichstiteln."""
     zaehler: Counter = Counter()
@@ -143,6 +158,19 @@ def teilname(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
     if not kandidaten:
         kandidaten = list(zaehler)
     beste = max(kandidaten, key=lambda w: (len(w), zaehler[w]))
+
+    # Gerätewort voranstellen, wenn es die Vergleichstitel deutlich mittragen.
+    #
+    # Das längste Wort allein reicht bei Elektronik nicht: Für 8K0907801J
+    # lieferten die Titel „Steuergerät Feststellbremse", und weil
+    # „Feststellbremse" (15 Zeichen) länger ist als „Steuergerät" (11), hieß
+    # das Teil im Inserat schlicht „Feststellbremse" — also die Bremse selbst
+    # statt ihres Steuergeräts. Ein Käufer, der danach sucht, findet das Teil
+    # nicht, und wer es kauft, erwartet etwas anderes.
+    haeufig = max(2, hoechste * 0.5)
+    for wort in GERAETEWOERTER:
+        if zaehler.get(wort, 0) >= haeufig and wort not in beste:
+            return "%s %s" % (wort.capitalize(), beste.capitalize())
     return beste.capitalize()
 
 

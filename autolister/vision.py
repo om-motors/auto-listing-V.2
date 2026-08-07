@@ -12,6 +12,7 @@ Zwei Betriebsarten:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Dict, List
 
@@ -72,7 +73,18 @@ def analysiere_lokal(photos: List[Path], vorgabe: str = "") -> Dict:
     deshalb nie eskaliert. Die zusätzliche Sekunde ist billiger als eine
     falsche Teilenummer im Inserat.
     """
-    texte = ocr.lies_fotos(photos, gruendlich=True)
+    # Je Foto getrennt lesen: kostet keine zusätzliche Zeit, verrät aber,
+    # welches Bild die Teilenummer zeigt. Das entscheidet später über die
+    # Reihenfolge beim Upload — eine Nahaufnahme des Aufklebers ist ein
+    # schlechtes Hauptbild.
+    je_foto = ocr.lies_fotos_einzeln(photos, gruendlich=True)
+    beste_je_text: dict = {}
+    for liste in je_foto:
+        for text, guete in liste:
+            text = text.strip()
+            if text and guete > beste_je_text.get(text, -1):
+                beste_je_text[text] = guete
+    texte = sorted(beste_je_text.items(), key=lambda p: -p[1])
     kandidaten = partnumber.finde_kandidaten(texte) if texte else []
 
     # Vom Nutzer vorgegebene Nummer (Ordnername) schlägt jede Lesart
@@ -110,7 +122,24 @@ def analysiere_lokal(photos: List[Path], vorgabe: str = "") -> Dict:
         "konfidenz_teilenummer": "hoch" if beste.punkte >= 5 else "mittel",
         "_kandidaten": kandidaten,
         "_ocr_text": [t for t, _ in texte],
+        # Welche Fotos zeigen die Teilenummer? Die gehören ans Ende der
+        # Bilderstrecke, nicht nach vorne.
+        "_nummer_fotos": _fotos_mit_nummer(photos, je_foto, beste.nummer),
     }
+
+
+def _fotos_mit_nummer(photos: List[Path], je_foto, nummer: str) -> List[str]:
+    """Fotos heraussuchen, auf denen die gefundene Teilenummer steht."""
+    gesucht = re.sub(r"[^A-Z0-9]", "", (nummer or "").upper())
+    if not gesucht:
+        return []
+    treffer = []
+    for foto, texte in zip(photos, je_foto):
+        for text, _ in texte:
+            if gesucht in re.sub(r"[^A-Z0-9]", "", text.upper()):
+                treffer.append(str(foto))
+                break
+    return treffer
 
 
 # --- Variante mit Bildmodell -------------------------------------------------

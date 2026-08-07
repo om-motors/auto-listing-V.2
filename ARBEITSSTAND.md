@@ -50,6 +50,34 @@ Ein Audi-Schmutzfänger (`8T0853888`), 4 Fotos. Drei Fehler, alle behoben:
 
 ---
 
+## Offene Wünsche des Nutzers (Rückmeldung 2026-08-07)
+
+Nach dem ersten Lauf mit drei echten Teilen. Der Reihe nach:
+
+1. **Hintergrund entfernen** — eBay hat im Foto-Editor einen Knopf
+   „Hintergrund entfernen"; die Bilder sehen damit deutlich besser aus (der
+   Nutzer hat es von Hand gemacht und die Screenshots geschickt). Gewünscht:
+   Das Programm soll das für **jedes** Foto selbst auslösen. Weg dorthin: Foto
+   anklicken → „Foto bearbeiten" → Knopf rechts unten → „Speichern".
+   **Noch nicht gebaut.** Kostet je Foto mehrere Klicks und ist ein neuer,
+   fragiler Formularbereich — erst angehen, wenn der jetzige Stand steht.
+2. **Internationaler Versand soll AN** — derzeit wird er bewusst
+   ausgeschaltet. Der Nutzer kennt die Versandkosten dafür noch nicht,
+   deshalb ausdrücklich **später**. Wenn es soweit ist: `_fill_form` setzt
+   `isInternationalShippingOn` auf `false` — das ist die Stelle.
+3. **Preis Schmutzfänger** — Programm sagte 38,90 €, der Nutzer hält 27–35 €
+   für richtig. Zu prüfen: Der Lauf mit Nummer `8T0853888F` (mit F) kam auf
+   38,90 €, der ohne F auf 28,90 €. Vermutlich zieht die Variante mit
+   Buchstabe teurere Vergleichsangebote heran. **Noch nicht untersucht.**
+
+Erledigt aus derselben Rückmeldung: Hauptfoto (Nummernbilder ans Ende),
+Teilname „Steuergerät Feststellbremse", Versandstufe für Steuergeräte.
+Das Armaturenbrett-Problem („alle Fotos aller drei Teile in einem Inserat")
+war ein Lauf **vor** der Gruppierung — sollte damit erledigt sein, ist aber
+mit echten Handyfotos noch nicht nachgewiesen.
+
+---
+
 ## Aktueller Stand
 
 > ### ⚠️ Repository-Wechsel (2026-08-02)
