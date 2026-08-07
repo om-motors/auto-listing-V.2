@@ -219,31 +219,25 @@ def _fotos_sortieren(photos: List[Path], vis: Dict) -> List[Path]:
     Zeigen *alle* Fotos die Nummer, wird nichts umsortiert — dann gibt es
     keine bessere Wahl, und eine willkürliche Umstellung wäre nur Unruhe.
     """
-    mit_nummer = set(vis.get("_nummer_fotos") or [])
-    ohne = [p for p in photos if str(p) not in mit_nummer]
-    mit = [p for p in photos if str(p) in mit_nummer]
-    if not ohne or not mit:
+    if len(photos) < 2:
         return list(photos)
 
-    # Unter den Übersichtsbildern das nach vorne, auf dem das Teil den Kasten
-    # am dichtesten füllt. Das trennt die flach liegende Gesamtansicht von
-    # schrägen Aufnahmen, bei denen der Kasten viel Schatten mitnimmt.
-    def fuellung(pfad) -> float:
+    from . import zuschnitt
+
+    def note(pfad) -> float:
         try:
-            from . import zuschnitt
-            bild = images.open_normalized(pfad)
-            kasten = zuschnitt.finde_kasten(bild)
-            if not kasten:
-                return 0.0
-            flaeche = (kasten[2] - kasten[0]) * (kasten[3] - kasten[1])
-            return flaeche / float(bild.size[0] * bild.size[1])
+            return zuschnitt.hauptfoto_note(images.open_normalized(pfad))
         except Exception:  # noqa: BLE001 — Reihenfolge darf nie den Lauf kippen
             return 0.0
 
-    ohne.sort(key=fuellung, reverse=True)
-    log.info("Fotoreihenfolge: '%s' als Hauptfoto, %d Bild(er) mit Teilenummer "
-             "ans Ende", ohne[0].name, len(mit))
-    return ohne + mit
+    bewertet = sorted(((note(p), p) for p in photos), key=lambda x: -x[0])
+    if bewertet[0][0] <= 0:
+        return list(photos)          # nichts messbar — Reihenfolge lassen
+
+    log.info("Hauptfoto: %s (Note %.3f, vor %s mit %.3f)",
+             bewertet[0][1].name, bewertet[0][0],
+             bewertet[1][1].name, bewertet[1][0])
+    return [p for _, p in bewertet]
 
 
 def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict:

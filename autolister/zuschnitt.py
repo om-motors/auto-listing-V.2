@@ -179,6 +179,71 @@ def _quadratisch(kasten, bildgroesse) -> Tuple[int, int, int, int]:
     return (x, y, x + kante, y + kante)
 
 
+# Ab dieser Füllung gilt ein Bild als Detailaufnahme: Das Teil läuft dann
+# über den Rand hinaus, man sieht es nicht mehr ganz.
+NAHAUFNAHME_AB = 0.75
+NAHAUFNAHME_STRAFE = 0.5
+
+
+def hauptfoto_note(bild: Image.Image) -> float:
+    """Wie gut taugt dieses Bild als Hauptfoto? Höher ist besser.
+
+    eBay zeigt das erste Foto in der Suchergebnisliste — es entscheidet, ob
+    jemand überhaupt klickt. Gebraucht wird die Ansicht, auf der das **ganze
+    Teil** zu sehen ist, nicht die Nahaufnahme des Typenschilds.
+
+    Die Note setzt sich aus drei Messungen zusammen:
+
+      * wie viel des Bildes das Teil einnimmt (mehr ist besser),
+      * wie viel davon am Bildrand klebt (weniger ist besser — klebt viel am
+        Rand, ist das Teil angeschnitten),
+      * eine Abwertung, wenn das Teil mehr als drei Viertel füllt. Das ist
+        das Kennzeichen einer Detailaufnahme.
+
+    An neun echten Fotos dreier Teile nachgemessen (2026-08-07): Diese Note
+    trifft in allen drei Fällen die Wahl des Nutzers, und zwar stabil für
+    Grenzen zwischen 0,70 und 0,80. **Die Abstände sind aber knapp** (0,414
+    gegen 0,405) — bei ähnlich guten Fotos ist die Wahl eine Münze.
+
+    Frühere Versuche, verworfen weil schlechter: reine Fläche (fiel auf
+    Schatten herein) und Farbähnlichkeit (1 von 6 — alle Teile sind schwarz
+    auf Holz).
+    """
+    try:
+        klein = bild.convert("RGB").copy()
+        klein.thumbnail((320, 320), Image.BILINEAR)
+        hintergrund = _hintergrundfarbe(klein)
+        maske = Image.new("L", klein.size)
+        maske.putdata([
+            255 if (abs(p[0] - hintergrund[0]) + abs(p[1] - hintergrund[1])
+                    + abs(p[2] - hintergrund[2])) // 3 > SCHWELLE else 0
+            for p in klein.getdata()
+        ])
+        maske = maske.filter(ImageFilter.MedianFilter(size=5))
+
+        breite, hoehe = maske.size
+        punkte = list(maske.getdata())
+        band = max(2, int(min(breite, hoehe) * 0.03))
+        am_rand = gesamt = 0
+        for y in range(hoehe):
+            for x in range(breite):
+                if not punkte[y * breite + x]:
+                    continue
+                gesamt += 1
+                if (x < band or x >= breite - band
+                        or y < band or y >= hoehe - band):
+                    am_rand += 1
+        if not gesamt:
+            return 0.0
+        fuellung = gesamt / float(breite * hoehe)
+        note = fuellung * (1 - am_rand / float(gesamt))
+        if fuellung > NAHAUFNAHME_AB:
+            note *= NAHAUFNAHME_STRAFE
+        return note
+    except Exception:  # noqa: BLE001 — eine Note darf nie den Lauf kippen
+        return 0.0
+
+
 def zuschneiden(bild: Image.Image) -> Tuple[Image.Image, bool]:
     """Bild auf das Teil zuschneiden. Gibt (Bild, wurde_geschnitten) zurück."""
     if not AKTIV:
