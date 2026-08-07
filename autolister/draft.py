@@ -716,6 +716,78 @@ def create_draft(listing: Dict, vision: Dict, description: str,
             browser.close()
 
 
+def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
+    """Bei jedem Foto eBays „Hintergrund entfernen" auslösen.
+
+    Aufbau des Editors, am echten Formular ermittelt (2026-08-07):
+
+        button.uploader-thumbnails-ux__image        Vorschaukachel, öffnet ihn
+          [aria-label="Foto 1 bearbeiten oder ansehen"]
+        div[role=dialog].uploader-editor            der Editor selbst
+          button.icon-btn[title="Hintergrund entfernen"]
+          button.icon-btn[aria-label="Nächste Datei laden"]
+          button.btn--primary                       "Fertig"
+
+    **Der Editor wird nur einmal geöffnet.** Er hat Blätterknöpfe, mit denen
+    man von Foto zu Foto springt, ohne ihn zu schließen — bei neun Fotos spart
+    das rund zwei Drittel der Klicks und macht den Ablauf spürbar robuster.
+
+    Gibt zurück, bei wie vielen Fotos der Knopf gedrückt wurde.
+    """
+    kacheln = page.locator("button.uploader-thumbnails-ux__image")
+    if not kacheln.count():
+        warnings.append("Hintergrund entfernen: keine Fotokacheln gefunden")
+        return 0
+
+    kacheln.first.scroll_into_view_if_needed(timeout=8000)
+    _dialoge_schliessen(page)
+    kacheln.first.click(timeout=8000)
+    _pause(page, 3000)
+
+    editor = page.locator("div[role=dialog].uploader-editor")
+    try:
+        editor.wait_for(state="visible", timeout=10000)
+    except Exception:
+        warnings.append("Hintergrund entfernen: Foto-Editor ging nicht auf")
+        return 0
+
+    knopf = editor.locator("button.icon-btn[title='Hintergrund entfernen']")
+    weiter = editor.locator("button.icon-btn[aria-label='Nächste Datei laden']")
+
+    bearbeitet = 0
+    for i in range(anzahl):
+        try:
+            if knopf.count() and knopf.first.is_visible():
+                knopf.first.click(timeout=8000)
+                bearbeitet += 1
+                # eBay rechnet das serverseitig — hier lohnt echtes Warten.
+                _pause(page, 3500)
+            else:
+                warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d" % (i + 1))
+        except Exception as fehler:
+            warnings.append("Hintergrund entfernen (Foto %d): %s"
+                            % (i + 1, str(fehler).splitlines()[0]))
+        if i + 1 >= anzahl:
+            break
+        try:
+            if not weiter.count() or not weiter.first.is_visible():
+                break            # letztes Foto erreicht
+            weiter.first.click(timeout=6000)
+            _pause(page, 1500)
+        except Exception:
+            break
+
+    fertig = editor.locator("button.btn--primary", has_text=re.compile(r"^\s*Fertig\s*$"))
+    if fertig.count():
+        _safe_click(page, fertig.first, warnings, "Foto-Editor schließen")
+    else:
+        page.keyboard.press("Escape")
+    _pause(page, 2000)
+
+    log.info("Hintergrund entfernt: %d von %d Foto(s)", bearbeitet, anzahl)
+    return bearbeitet
+
+
 def _kategorie_waehlen(page, warnings: List[str]) -> bool:
     """Die Kategorieabfrage auf `/sl/prelist/identify` beantworten.
 
@@ -903,6 +975,22 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
     _formular_bereit(page, warnings)
     anzahl = _tooltips_schliessen(page)
     log.info("Formular geladen, %d Hinweisfenster geschlossen", anzahl)
+
+    # --- Hintergrund der Fotos entfernen (Vorgabe des Nutzers 2026-08-07) ---
+    if photos and config.HINTERGRUND_ENTFERNEN:
+        entfernt = {"anzahl": 0}
+
+        def hintergrund():
+            entfernt["anzahl"] = _hintergrund_entfernen(page, len(photos), warnings)
+
+        def hintergrund_kontrolle():
+            global _LETZTE_ABWEICHUNG
+            if entfernt["anzahl"] >= len(photos):
+                return True
+            _LETZTE_ABWEICHUNG = ("%d von %d Foto(s) bearbeitet"
+                                  % (entfernt["anzahl"], len(photos)))
+            return False
+        _step(warnings, "Hintergrund entfernen", hintergrund, hintergrund_kontrolle)
 
     # --- Zustand: Gebraucht ---
     def set_condition():

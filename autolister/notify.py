@@ -37,6 +37,7 @@ SCHRITT_KLARTEXT = {
     "Preis": "Preis eintragen: %(preis)s",
     "Titel": "Titel eintragen",
     "Foto-Upload": "Fotos hochladen",
+    "Hintergrund entfernen": "Hintergrund der Fotos im eBay-Editor entfernen",
     "Preisvorschläge": "Preisvorschläge zulassen einschalten",
 }
 

@@ -94,6 +94,10 @@ RUECKVERSAND_ZAHLT_KAEUFER = True
 # Artikelmerkmale, die bewusst NICHT gesetzt werden (Vorgabe des Nutzers)
 MERKMALE_AUSLASSEN = {"Einbauposition"}
 
+# eBays "Hintergrund entfernen" für jedes Foto auslösen. Sieht deutlich besser
+# aus, kostet aber Zeit: eBay rechnet je Bild ein paar Sekunden.
+HINTERGRUND_ENTFERNEN = os.environ.get("AUTOLISTER_HINTERGRUND", "1") == "1"
+
 
 def aktiver_modus() -> str:
     """Welche Betriebsart läuft tatsächlich?
