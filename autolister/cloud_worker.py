@@ -197,6 +197,16 @@ def main() -> None:
     if dry_run:
         log.info("TROCKENLAUF: Formulare werden ausgefüllt, aber nicht gespeichert.")
 
+    # Beim Start aufräumen: was noch auf `laeuft` steht, kann niemand bearbeiten
+    # — der vorige Lauf ist abgestürzt oder der Mac ging aus. Ohne das bliebe
+    # der Auftrag für immer liegen, weil nur `neu` gegriffen wird.
+    try:
+        frei = cloud.haengende_freigeben()
+        if frei:
+            log.info("%d steckengebliebene(r) Auftrag wieder freigegeben", frei)
+    except Exception as fehler:  # noqa: BLE001 — darf den Start nicht verhindern
+        log.warning("Aufräumen beim Start fehlgeschlagen: %s", fehler)
+
     if einmal:
         anzahl = warteschlange_leeren(dry_run)
         log.info("%d Auftrag/Aufträge verarbeitet.", anzahl)

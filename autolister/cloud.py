@@ -102,6 +102,29 @@ def naechster_auftrag() -> Optional[Dict]:
     return auftrag
 
 
+def haengende_freigeben() -> int:
+    """Steckengebliebene Aufträge zurück auf `neu` setzen. Nur beim Start!
+
+    Ein Auftrag auf `laeuft` bedeutet: irgendwer arbeitet daran. Startet der
+    Arbeiter gerade erst, kann das niemand sein — der vorige Lauf ist
+    abgestürzt, wurde beendet oder der Mac ging aus. Solche Aufträge blieben
+    sonst für immer liegen, denn `naechster_auftrag()` greift nur `neu`.
+
+    **Bewusst kein Zeitlimit zur Laufzeit.** Am 2026-08-03 gemessen: zwei
+    Aufträge brauchten 1 h 53 und 2 h 48 von `begonnen_am` bis `fertig_am` —
+    nicht weil sie hingen, sondern weil das MacBook dazwischen schlief und
+    danach weiterarbeitete. Ein Zeitlimit hätte sie mitten im Lauf
+    zurückgesetzt und doppelte Entwürfe erzeugt. Beim Laptop ist die lange
+    Pause der Normalfall, nicht das Warnzeichen.
+    """
+    zurueck = _anfrage(
+        "/rest/v1/auftraege?status=eq.laeuft", methode="PATCH",
+        daten=json.dumps({"status": "neu", "begonnen_am": None}).encode("utf-8"),
+        kopfzeilen={"Content-Type": "application/json",
+                    "Prefer": "return=representation"})
+    return len(zurueck or [])
+
+
 def ergebnis_melden(auftrag_id: str, listing: Dict, result: Dict,
                     bericht_text: str, offene_punkte: List[str]) -> None:
     """Einen fertigen Auftrag mit seinem Ergebnis abschließen."""
