@@ -64,6 +64,13 @@ POSITIONEN = [
 
 # Versandstufe nach Stichwort im Teilnamen. Reihenfolge = Prüfreihenfolge,
 # das erste passende Stichwort gewinnt. Im Zweifel die kleinere Stufe.
+# Wörter, die ein Teil als Hülle/Anbauteil eines größeren Teils ausweisen.
+# Steht so eines vorn, entscheidet es allein über die Versandstufe.
+# Achtung: Nur als EIGENES Wort. Zusammengesetzte wie "Türverkleidung"
+# bleiben unberührt und gehen weiterhin per Spedition.
+HUELLWOERTER = ("abdeckung", "verkleidung", "blende", "rahmen", "halter",
+                "leiste", "zierleiste", "kappe", "deckel", "gitter")
+
 VERSAND_STICHWOERTER = [
     ("Spedition", ("tür", "tuer", "haube", "kotflügel", "kotfluegel", "sitz",
                    "motor", "getriebe", "differential", "differenzial",
@@ -135,7 +142,12 @@ def vergleichbare_angebote(angebote: List[Dict], teilenummer: str) -> List[int]:
 # wie „Halter" oder „Blende" hier aufzunehmen würde vor fast jedes Teil etwas
 # schreiben.
 GERAETEWOERTER = ("steuergerät", "steuergeraet", "sensor", "schalter",
-                  "relais", "pumpe", "ventil", "modul")
+                  "relais", "pumpe", "ventil", "modul",
+                  # Auch Hüllteile brauchen das Bestimmungswort: 8K0857085B
+                  # hieß im Inserat schlicht "Armaturenbrett" — verkauft wurde
+                  # aber die **Abdeckung** dafür, ein Kunststoffteil für 19 €.
+                  # Wer ein Armaturenbrett sucht, erwartet etwas anderes.
+                  "abdeckung", "verkleidung", "blende", "rahmen", "halter")
 
 
 def teilname(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
@@ -246,7 +258,18 @@ def versandstufe(teil: Optional[str], zusatztext: str = "") -> str:
     „Halter" ausdrücklich unter Standard.
     """
     kopf = (teil or "").strip().split()
-    aus_teil = _stufe_aus_text(kopf[0] if kopf else "") or _stufe_aus_text(teil)
+    erstes = kopf[0].lower() if kopf else ""
+
+    # **Hüllteile erben die Größe ihres Bezugsteils nicht.** Eine „Abdeckung
+    # Armaturenbrett" ist ein Kunststoffteil für 19 €, kein Armaturenbrett.
+    # Ohne diese Regel zog das Wort „armaturenbrett" im Namen die Stufe auf
+    # Spedition (60 €) — derselbe Fehler wie beim Schmutzfänger am
+    # 2026-08-07, nur andersherum eingefädelt. Das folgende Hauptwort darf
+    # also nicht mehr hochstufen; es entscheidet allein das Hüllwort.
+    if erstes in HUELLWOERTER:
+        return _stufe_aus_text(erstes) or "Standard"
+
+    aus_teil = _stufe_aus_text(erstes) or _stufe_aus_text(teil)
     if aus_teil:
         return aus_teil
 

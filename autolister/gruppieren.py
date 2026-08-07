@@ -117,13 +117,23 @@ def nach_teilenummer(fotos: List[Path]) -> Optional[List[List[Path]]]:
     for _, nummer in anker:
         gruppen_von_nummer.setdefault(nummer, [])
 
+    # **Alles nach einer Teilenummer gehört zu diesem Teil, bis die nächste
+    # Nummer auftaucht.** Fotos vor der allerersten Nummer gehören zum ersten
+    # Teil — davor gibt es ja nichts anderes.
+    #
+    # Vorher wurde der *nächstgelegene* Anker genommen, egal ob davor oder
+    # dahinter. Das ging am 2026-08-07 daneben: Ein Foto der
+    # Lautsprecherabdeckung lag ein Bild vor der Armaturenbrett-Nummer und
+    # zwei hinter der eigenen — es landete im falschen Inserat, und zwar als
+    # Hauptfoto. An den neun Fotos jenes Uploads nachgerechnet: die
+    # Rückwärtsregel trifft 9 von 9, das Abstandsverfahren 8 von 9.
     for i, foto in enumerate(fotos):
         if nummern[i]:
             gruppen_von_nummer[nummern[i]].append(foto)
             continue
-        # Nächstgelegener Ankerpunkt in der Reihenfolge
-        naechster = min(anker, key=lambda a: abs(a[0] - i))
-        gruppen_von_nummer[naechster[1]].append(foto)
+        davor = [a for a in anker if a[0] < i]
+        zustaendig = davor[-1][1] if davor else anker[0][1]
+        gruppen_von_nummer[zustaendig].append(foto)
 
     # Reihenfolge der Gruppen: wie sie zuerst auftauchen
     reihenfolge = []

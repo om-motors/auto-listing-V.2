@@ -362,12 +362,28 @@ def _ist_noch_entwurf(page) -> bool:
     exakt aus wie ein gespeicherter Entwurf — der Bericht würde lügen, und zwar
     an der einzigen Stelle, an der das wirklich teuer ist.
     """
-    try:
-        if "draftId" in (page.url or ""):
-            return True
-        text = (page.locator("body").inner_text(timeout=8000) or "").lower()
-    except Exception:
-        return False
+    # Nach dem Speichern landet man auf der Entwurfsliste — das ist selbst der
+    # Beweis. Am 2026-08-07 fehlte diese Zeile, und die Kontrolle schlug
+    # Alarm ("prüfen, ob versehentlich ein Angebot online gegangen ist"),
+    # obwohl alles in Ordnung war. Ein Fehlalarm ausgerechnet hier ist
+    # schädlich: Wer diese Meldung zweimal umsonst liest, liest sie beim
+    # dritten Mal nicht mehr.
+    url = (page.url or "").lower()
+    if "draftid" in url or "/lst/drafts" in url:
+        return True
+
+    text = ""
+    for _ in range(3):          # die Seite lädt nach dem Speichern noch
+        try:
+            text = (page.locator("body").inner_text(timeout=8000) or "").lower()
+            if text:
+                break
+        except Exception:
+            pass
+        _pause(page, 1500)
+    if not text:
+        return False            # nichts lesbar -> lieber melden als schweigen
+
     if any(w in text for w in ("ist online", "wurde eingestellt", "artikel ansehen",
                                "angebot ansehen", "erfolgreich eingestellt")):
         return False
@@ -754,14 +770,44 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
     knopf = editor.locator("button.icon-btn[title='Hintergrund entfernen']")
     weiter = editor.locator("button.icon-btn[aria-label='Nächste Datei laden']")
 
+    def warte_bis_bereit(sekunden: int = 40) -> bool:
+        """Warten, bis der Editor wieder bedienbar ist.
+
+        **Nicht über eine feste Pause.** eBay rechnet das Freistellen
+        serverseitig und sperrt so lange die Bedienelemente. Am 2026-08-07
+        stand hier `_pause(page, 3500)` — mit dem Tempo-Regler also 2,1 s, und
+        das war zu kurz: Der Weiterblättern-Knopf war noch gesperrt, die
+        Schleife brach ab und es wurde bei jedem Teil nur **ein** Foto
+        bearbeitet ("1 von 3", "1 von 2", "1 von 4").
+
+        Die Wartezeit hängt bewusst **nicht** am Tempo-Regler: Hier wird auf
+        einen fremden Server gewartet, nicht auf das Nachzeichnen der Seite.
+        """
+        ende = time.time() + sekunden
+        while time.time() < ende:
+            try:
+                if (weiter.count() and weiter.first.is_visible()
+                        and not weiter.first.is_disabled()):
+                    return True
+                # Beim letzten Foto ist "weiter" dauerhaft gesperrt — dann
+                # zählt, ob der Hintergrund-Knopf wieder ansprechbar ist.
+                if (knopf.count() and knopf.first.is_visible()
+                        and not knopf.first.is_disabled()):
+                    return True
+            except Exception:
+                pass
+            page.wait_for_timeout(700)
+        return False
+
     bearbeitet = 0
     for i in range(anzahl):
         try:
             if knopf.count() and knopf.first.is_visible():
                 knopf.first.click(timeout=8000)
                 bearbeitet += 1
-                # eBay rechnet das serverseitig — hier lohnt echtes Warten.
-                _pause(page, 3500)
+                if not warte_bis_bereit():
+                    warnings.append("Hintergrund entfernen: Foto %d brauchte "
+                                    "länger als 40 s" % (i + 1))
             else:
                 warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d" % (i + 1))
         except Exception as fehler:
@@ -771,10 +817,15 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
             break
         try:
             if not weiter.count() or not weiter.first.is_visible():
-                break            # letztes Foto erreicht
+                break                     # letztes Foto erreicht
+            if weiter.first.is_disabled():
+                break
             weiter.first.click(timeout=6000)
-            _pause(page, 1500)
-        except Exception:
+            _pause(page, 1200)
+        except Exception as fehler:
+            warnings.append("Hintergrund entfernen: Blättern zu Foto %d "
+                            "fehlgeschlagen (%s)"
+                            % (i + 2, str(fehler).splitlines()[0]))
             break
 
     fertig = editor.locator("button.btn--primary", has_text=re.compile(r"^\s*Fertig\s*$"))
@@ -973,6 +1024,14 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
 
     # --- Warten, bis wirklich alles da ist, dann Hinweisfenster wegklicken ---
     _formular_bereit(page, warnings)
+
+    # Entwurfsadresse JETZT festhalten, nicht am Ende.
+    #
+    # `_entwurfsadresse()` wartet darauf, dass `draftId` in der URL steht. Am
+    # Ende des Ablaufs ist das zu spät: Nach dem Speichern leitet eBay auf die
+    # Entwurfsliste `/sh/lst/drafts` um, und genau die landete am 2026-08-07 im
+    # Bericht und auf dem Handy — ein Link, der den Entwurf nicht öffnet.
+    draft_url = _entwurfsadresse() or draft_url
     anzahl = _tooltips_schliessen(page)
     log.info("Formular geladen, %d Hinweisfenster geschlossen", anzahl)
 
@@ -1365,7 +1424,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
 
     if dry_run:
         warnings.append("TROCKENLAUF: Formular ausgefüllt, aber NICHT gespeichert.")
-        return {"draft_url": _entwurfsadresse(), "screenshot": str(shot) if shot.exists() else None}
+        return {"draft_url": draft_url, "screenshot": str(shot) if shot.exists() else None}
 
     # --- SPEICHERN (niemals veröffentlichen!) ---
     # Am echten Formular heißt der gewollte Knopf exakt
@@ -1415,4 +1474,4 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             "ebay.de/sh/lst/active nachsehen, ob versehentlich ein Angebot online "
             "gegangen ist." % (page.url or "")[:120])
 
-    return {"draft_url": _entwurfsadresse(), "screenshot": str(shot) if shot.exists() else None}
+    return {"draft_url": draft_url, "screenshot": str(shot) if shot.exists() else None}
