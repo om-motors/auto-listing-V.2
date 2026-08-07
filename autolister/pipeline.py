@@ -234,10 +234,24 @@ def _fotos_sortieren(photos: List[Path], vis: Dict) -> List[Path]:
     if bewertet[0][0] <= 0:
         return list(photos)          # nichts messbar — Reihenfolge lassen
 
-    log.info("Hauptfoto: %s (Note %.3f, vor %s mit %.3f)",
+    # Das beste Bild führt die Strecke an. Unter den übrigen wandern die
+    # Aufnahmen mit Teilenummer ans Ende — das sind die Nahaufnahmen des
+    # Typenschilds, die niemand als zweites Bild sehen will.
+    #
+    # Bewusst erst ab Platz zwei: Beim Steuergerät 8K0907801J ist ausgerechnet
+    # das Etikettfoto die beste Gesamtansicht. Es pauschal nach hinten zu
+    # schieben würde das beste Bild verschenken.
+    mit_nummer = set(vis.get("_nummer_fotos") or [])
+    reihe = [p for _, p in bewertet]
+    kopf, rest = reihe[:1], reihe[1:]
+    vorne = [p for p in rest if str(p) not in mit_nummer]
+    hinten = [p for p in rest if str(p) in mit_nummer]
+
+    log.info("Hauptfoto: %s (Note %.3f, vor %s mit %.3f)%s",
              bewertet[0][1].name, bewertet[0][0],
-             bewertet[1][1].name, bewertet[1][0])
-    return [p for _, p in bewertet]
+             bewertet[1][1].name, bewertet[1][0],
+             " — %d Nummernfoto(s) ans Ende" % len(hinten) if hinten else "")
+    return kopf + vorne + hinten
 
 
 def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict:

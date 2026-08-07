@@ -770,6 +770,28 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
     knopf = editor.locator("button.icon-btn[title='Hintergrund entfernen']")
     weiter = editor.locator("button.icon-btn[aria-label='Nächste Datei laden']")
 
+    def klick_mit_geduld(ziel, sekunden: int = 45) -> bool:
+        """Klicken, bis es klappt — nicht einmal versuchen und aufgeben.
+
+        eBay legt beim Freistellen eine Sperrschicht über den Editor.
+        Playwright wartet dann darauf, dass der Knopf klickbar wird, und läuft
+        in seinen Timeout: „Blättern zu Foto 2 fehlgeschlagen (Timeout
+        6000 ms)". Genau daran blieb es am 2026-08-07 bei **einem** Foto je
+        Teil hängen.
+
+        Ein Sichtbarkeitstest hilft hier nicht: Ein überdecktes Element gilt
+        weiterhin als sichtbar und nicht gesperrt. Nur der Klick selbst weiß,
+        ob er durchkommt.
+        """
+        ende = time.time() + sekunden
+        while time.time() < ende:
+            try:
+                ziel.click(timeout=4000)
+                return True
+            except Exception:
+                page.wait_for_timeout(900)
+        return False
+
     def warte_bis_bereit(sekunden: int = 40) -> bool:
         """Warten, bis der Editor wieder bedienbar ist.
 
@@ -801,39 +823,45 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
 
     bearbeitet = 0
     for i in range(anzahl):
-        try:
-            if knopf.count() and knopf.first.is_visible():
-                knopf.first.click(timeout=8000)
-                bearbeitet += 1
-                if not warte_bis_bereit():
-                    warnings.append("Hintergrund entfernen: Foto %d brauchte "
-                                    "länger als 40 s" % (i + 1))
-            else:
-                warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d" % (i + 1))
-        except Exception as fehler:
-            warnings.append("Hintergrund entfernen (Foto %d): %s"
-                            % (i + 1, str(fehler).splitlines()[0]))
+        if not knopf.count():
+            warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d" % (i + 1))
+        elif klick_mit_geduld(knopf.first):
+            bearbeitet += 1
+            warte_bis_bereit()
+        else:
+            warnings.append("Hintergrund entfernen: Foto %d ließ sich in 45 s "
+                            "nicht freistellen" % (i + 1))
+
         if i + 1 >= anzahl:
             break
-        try:
-            if not weiter.count() or not weiter.first.is_visible():
-                break                     # letztes Foto erreicht
-            if weiter.first.is_disabled():
-                break
-            weiter.first.click(timeout=6000)
-            _pause(page, 1200)
-        except Exception as fehler:
+        if not weiter.count() or weiter.first.is_disabled():
+            break                          # letztes Foto erreicht
+        if not klick_mit_geduld(weiter.first):
             warnings.append("Hintergrund entfernen: Blättern zu Foto %d "
-                            "fehlgeschlagen (%s)"
-                            % (i + 2, str(fehler).splitlines()[0]))
+                            "klappte auch nach 45 s nicht" % (i + 2))
             break
+        _pause(page, 1200)
 
-    fertig = editor.locator("button.btn--primary", has_text=re.compile(r"^\s*Fertig\s*$"))
-    if fertig.count():
-        _safe_click(page, fertig.first, warnings, "Foto-Editor schließen")
-    else:
+    # Editor sicher schließen und das auch nachprüfen.
+    #
+    # Bleibt er offen, liegt er über dem ganzen Formular und lässt jeden
+    # folgenden Schritt scheitern — am 2026-08-07 fiel dadurch der Zustand
+    # „Gebraucht" aus, ohne dass die Ursache im Bericht zu erkennen war.
+    fertig = editor.locator("button.btn--primary",
+                            has_text=re.compile(r"^\s*Fertig\s*$"))
+    for versuch in range(3):
+        if not editor.count() or not editor.first.is_visible():
+            break
+        if fertig.count() and klick_mit_geduld(fertig.first, sekunden=20):
+            _pause(page, 2000)
+            continue
         page.keyboard.press("Escape")
-    _pause(page, 2000)
+        _pause(page, 1500)
+    else:
+        if editor.count() and editor.first.is_visible():
+            warnings.append("Hintergrund entfernen: Foto-Editor ließ sich nicht "
+                            "schließen — folgende Schritte können daran scheitern")
+    _pause(page, 1200)
 
     log.info("Hintergrund entfernt: %d von %d Foto(s)", bearbeitet, anzahl)
     return bearbeitet
