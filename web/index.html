@@ -99,7 +99,15 @@
   <section id="upload" class="karte verborgen">
     <div class="feld">
       <label for="fotos">Fotos vom Teil</label>
-      <input id="fotos" type="file" accept="image/*" multiple>
+      <!-- HEIC MUSS hier stehen. Mit accept="image/*" allein wandelt iOS die
+           Fotos aus der Mediathek beim Hochladen nach JPEG um und verkleinert
+           sie dabei: Am 2026-08-07 kamen aus 3024x4032 (2,6 MB) nur noch
+           1600x2134 (0,5 MB) an. Fuer die Texterkennung ist das zu wenig —
+           laut CLAUDE.md zerfaellt die Teilenummer schon unter 3000 px.
+           Wird HEIC ausdruecklich genannt, reicht iOS das Original durch;
+           der Mac wandelt es selbst um (pillow-heif). -->
+      <input id="fotos" type="file" multiple
+             accept="image/heic,image/heif,image/jpeg,image/png,image/*">
       <p class="hinweis">
         Mindestens ein Foto der eingestanzten Teilenummer — möglichst scharf und
         formatfüllend. Die Bilder werden in Originalgröße übertragen, weil die
