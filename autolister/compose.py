@@ -101,16 +101,33 @@ def _preis_rechnen(angebote: List[Dict], indizes: List[int]) -> Dict:
     }
 
 
+def _quelle(angebote: List[Dict], indizes: List[int], name: str,
+            nummer: str, **rest) -> Dict:
+    """Eine Preisgrundlage samt Auskunft darüber, woraus sie besteht."""
+    genau = set(ableiten.treffer_nach_nummer(angebote, nummer)[0])
+    fremde = [i for i in indizes if i not in genau]
+    ergebnis = {
+        "angebote": angebote,
+        "indizes": indizes,
+        "quelle": name,
+        "fremde_anzahl": len(fremde),
+        "fremde_nummern": ableiten.fremde_nummern(angebote, fremde, nummer),
+    }
+    ergebnis.update(rest)
+    return ergebnis
+
+
 def _preisquelle(research_result: Dict, nummer: str) -> Dict:
     """Bevorzugt tatsächlich verkaufte Artikel als Preisgrundlage."""
     verkaufte = research_result.get("verkaufte") or []
     passend = ableiten.vergleichbare_angebote(verkaufte, nummer) if verkaufte else []
     if len(passend) >= 3:
-        return {"angebote": verkaufte, "indizes": passend, "quelle": "verkaufte Artikel"}
+        return _quelle(verkaufte, passend, "verkaufte Artikel", nummer)
     angebote = research_result.get("angebote", [])
-    return {"angebote": angebote,
-            "indizes": ableiten.vergleichbare_angebote(angebote, nummer),
-            "quelle": "laufende Angebote"}
+    return _quelle(angebote, ableiten.vergleichbare_angebote(angebote, nummer),
+                   "laufende Angebote", nummer,
+                   verkaufte_gefunden=len(verkaufte),
+                   verkaufte_passend=len(passend))
 
 
 def _lokal(vision_result: Dict, research_result: Dict) -> Dict:
@@ -120,18 +137,26 @@ def _lokal(vision_result: Dict, research_result: Dict) -> Dict:
     hersteller = vision_result.get("hersteller")
 
     indizes = ableiten.vergleichbare_angebote(angebote, nummer)
-    teil = ableiten.teilname(angebote, indizes) or vision_result.get("teil_vermutung")
-    codes = ableiten.modellcodes(angebote, indizes)
+
+    # **Benennen und Rechnen brauchen verschiedene Auswahlen.**
+    # Zum Benennen zählen die anderen Ausführungen mit: ein 8K0907801H ist
+    # genauso ein „Steuergerät Feststellbremse" wie das 8K0907801J, und je
+    # mehr Titel mitzählen, desto stabiler das Auszählen. Beim Preis ist es
+    # umgekehrt — dort entscheidet der Nachsatzbuchstabe über den Betrag,
+    # deshalb hält `_preisquelle()` die Auswahl dort eng.
+    benennung = ableiten.treffer_nach_nummer(angebote, nummer)[1] or indizes
+    teil = ableiten.teilname(angebote, benennung) or vision_result.get("teil_vermutung")
+    codes = ableiten.modellcodes(angebote, benennung)
     # Steht auf dem Teil nur das Logo, kennt die Texterkennung die Marke nicht.
     # Die Vergleichstitel nennen sie fast immer.
     if not hersteller or hersteller in ("Audi/VW",):
-        hersteller = ableiten.hersteller(angebote, indizes) or hersteller
+        hersteller = ableiten.hersteller(angebote, benennung) or hersteller
         # zurückschreiben, damit Beschreibung und Bericht dieselbe Marke nennen
         if hersteller:
             vision_result["hersteller"] = hersteller
-    pos = vision_result.get("position") or ableiten.position(angebote, indizes)
+    pos = vision_result.get("position") or ableiten.position(angebote, benennung)
     stufe = ableiten.versandstufe(teil, " ".join(
-        angebote[i]["titel"] for i in indizes[:5]))
+        angebote[i]["titel"] for i in benennung[:5]))
 
     hinweise = ["Teilname und Modellcodes wurden aus den Vergleichsangeboten "
                 "abgeleitet (ohne KI) — bitte im Entwurf gegenlesen."]
@@ -148,9 +173,21 @@ def _lokal(vision_result: Dict, research_result: Dict) -> Dict:
 
     quelle = _preisquelle(research_result, nummer)
     hinweise.append("Preis aus %d %s." % (len(quelle["indizes"]), quelle["quelle"]))
+    if quelle["fremde_anzahl"]:
+        hinweise.append(
+            "ACHTUNG: Davon führen %d Angebote eine andere Ausführung (%s) — "
+            "mit genau %s gab es zu wenige. Ein anderer Nachsatzbuchstabe ist "
+            "ein anderes Teil und kostet anders; Preis nur grob."
+            % (quelle["fremde_anzahl"],
+               ", ".join(quelle["fremde_nummern"][:3]) or "anderer Nachsatz",
+               nummer))
     if quelle["quelle"] == "laufende Angebote":
-        hinweise.append("Das sind Wunschpreise laufender Inserate, keine "
-                        "erzielten Verkäufe — im Zweifel etwas darunter bleiben.")
+        hinweise.append(
+            "Das sind Wunschpreise laufender Inserate, keine erzielten "
+            "Verkäufe — im Zweifel etwas darunter bleiben. (Verkaufte "
+            "Artikel: %d gefunden, %d mit dieser Nummer — nötig sind 3.)"
+            % (quelle.get("verkaufte_gefunden", 0),
+               quelle.get("verkaufte_passend", 0)))
 
     ergebnis = {
         "titel": ableiten.baue_titel(hersteller, codes, teil, pos, nummer),

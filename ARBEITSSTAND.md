@@ -8,7 +8,7 @@ Hier steht deshalb, **wo die Arbeit gerade steht und was als Nächstes ansteht**
 der Stand geändert hat — erledigte Punkte streichen, neue Erkenntnisse eintragen.
 Dauerhaftes Wissen über das Projekt gehört dagegen nach `CLAUDE.md`, nicht hierher.
 
-Letzte Aktualisierung: 2026-08-01 (nach dem ersten Echtlauf)
+Letzte Aktualisierung: 2026-08-08 (Preisbasis geschärft)
 
 ---
 
@@ -25,8 +25,9 @@ Supabase → Mac → eBay-Formular. Die Kette **funktioniert**.
 - Der Arbeiter läuft **noch nicht als Dienst** — bisher von Hand gestartet
 - Der alte Ordner-Watcher (`Eingang/`) läuft weiter parallel. Vor dem
   Dauerbetrieb des Cloud-Arbeiters abschalten, sonst laufen zwei Wege nebeneinander.
-- **Das Browserprofil ist auf dem Testkonto `samekili9`.** Jeder Entwurf landet
-  dort, bis `python -m autolister.login` auf `om.motors` umgestellt wird.
+- ~~Das Browserprofil ist auf dem Testkonto `samekili9`.~~ **Seit 2026-08-08
+  ist das Profil auf `om.motors`** — dem echten Verkäuferkonto. Ab jetzt landet
+  jeder Entwurf dort und nicht mehr im Testkonto.
 
 ### Was der erste echte Auftrag vom Handy aufgedeckt hat
 
@@ -74,15 +75,77 @@ Teil, mit Freistellen entsprechend länger.
 1. **Nahaufnahmen lassen sich nicht freistellen** — eBay kann das Teil dort
    nicht isolieren. Keine Fehlfunktion, aber der Bericht meldet es als
    „N von M". Vielleicht sollten solche Fotos gar nicht erst versucht werden.
-2. **Preis Schmutzfänger** — Programm 38,90 €, Nutzer hält 27–35 € für
-   richtig. Verdacht: Nummern mit Buchstabensuffix (`8T0853888F`) ziehen
-   teurere Vergleichsangebote. Noch nicht untersucht.
+2. ~~**Preis Schmutzfänger**~~ — untersucht am 2026-08-08, siehe unten. Der
+   Filterfehler war echt, traf aber das Steuergerät, nicht den Schmutzfänger.
+   Offen bleibt allein die Frage, ob 27–35 € für den Schmutzfänger richtig
+   sind — das entscheiden verkaufte Artikel, und die gab es zu wenige.
 3. **Internationaler Versand** soll später AN — derzeit bewusst aus.
    Stelle: `isInternationalShippingOn` in `_fill_form`.
 4. Aus dem Audit unverändert offen: A7 (implizites Submit durch Enter),
    E2 (Captcha-Erkennung nur per URL), E3 (Bericht bei Abbruch).
-5. **Konto ist noch `samekili9`** (Test). Umstellen auf `om.motors` mit
-   `python -m autolister.login`.
+5. ~~Konto ist noch `samekili9`.~~ **Erledigt 2026-08-08: Profil ist auf
+   `om.motors`.** Damit sind die Entwürfe echt — der nächste Lauf sollte
+   beobachtet werden, nicht nur der Bericht gelesen.
+
+---
+
+## Stand 2026-08-08 — Preisbasis geschärft
+
+**Der offene Punkt „Preis Schmutzfänger" ist untersucht. Die Vermutung des
+Nutzers trifft zu — aber an einem anderen Teil als vermutet.**
+
+Gemessen wurde an den Preisbasen aus **17 echten Berichten** unter `Berichte/`,
+ohne Browser und ohne Netz.
+
+- **Die genaue Teilenummer wurde nie geprüft.** `vergleichbare_angebote()`
+  ließ jeden Titel durch, in dem der Nummernstamm *ohne* Nachsatzbuchstaben
+  vorkam. Da der Stamm in jeder Variante steckt, war die vorgeschaltete
+  Prüfung auf die genaue Nummer wirkungslos — gelockert wurde **immer**.
+- **Betroffen ist nicht der Schmutzfänger, sondern das Steuergerät
+  `8K0907801J`:** 10 von 23 Vergleichsangeboten führten in Wahrheit `…801H`,
+  `…801M`, `…801N`, `…801D`, `…801E` oder `…801F`. Preis 24,90 € statt 22,90 €.
+- **Beim Schmutzfänger `8T0853888F` ändert sich nichts** — dort führen alle 17
+  Vergleichsangebote genau diese Nummer. Der Unterschied 38,90 € (mit F) zu
+  28,90 € (ohne F) kommt also nicht vom Filter, sondern von der **eBay-Suche
+  selbst**: ohne das F liefert sie teilweise andere Teile. Der Lauf *mit* F ist
+  der genauere von beiden, nicht der schlechtere.
+- **Die 27–35 € des Nutzers sind damit weder belegt noch widerlegt.** Die 17
+  Vergleichsangebote sind Wunschpreise laufender Inserate; echte Schmutzfänger
+  darunter stehen bei 31–51 €. Verkaufte Artikel gab es zu dieser Nummer nicht
+  genug — **wie viele es waren, sagt der Bericht ab jetzt.**
+
+**Geändert**
+
+| | |
+|---|---|
+| `ableiten.treffer_nach_nummer()` | neu — trennt genaue von gelockerten Treffern |
+| `ableiten.vergleichbare_angebote()` | genaue Nummer zuerst; Lockerung erst unter 3 Treffern |
+| `ableiten.fremde_nummern()` | neu — benennt die mitgerechneten Varianten |
+| `compose._lokal()` | Benennung aus der weiten Auswahl, Preis aus der engen |
+| Bericht | meldet jede Lockerung samt fremder Nummern und nennt die Zahl der gefundenen verkauften Artikel |
+| `tests/` | neu — 12 Fälle mit echten Titeln, ohne neues Paket |
+
+**Nachweis:** alle 17 Preisbasen durch alte *und* neue Fassung gerechnet —
+**Benennung 0 Änderungen** (Teilname, Modellcodes, Position, Versandstufe,
+Titel), **Preis 9 Änderungen**, alle nach unten, alle genau dort, wo fremde
+Ausführungen mitgerechnet wurden.
+
+**Noch nicht belegt:** Das ist an Berichtsdaten gerechnet, nicht an einem
+Echtlauf. Die eigentliche Probe ist der nächste Lauf mit einem Teil, dessen
+Nummer einen Nachsatzbuchstaben trägt.
+
+### Konto umgestellt (2026-08-08)
+
+Das Browserprofil ist von `samekili9` (Test) auf **`om.motors`** umgestellt,
+im Browser bestätigt. **Damit sind die Entwürfe ab sofort echt.** Zwei Dinge
+folgen daraus:
+
+- Der **nächste Lauf gehört beobachtet**, nicht nur nachgelesen. Bisher war
+  ein Fehlgriff eine Zeile im Bericht; jetzt steht er im Verkäuferkonto.
+- Die Veröffentlichungssperre (`FORBIDDEN` in `draft.py`) trägt ab jetzt
+  echtes Gewicht. Sie war nie herausgefordert worden — siehe die offen
+  gebliebenen Befunde A1, A2, A5, A7. Das bleibt der wichtigste ungeprüfte
+  Teil des Programms.
 
 ---
 
@@ -101,10 +164,12 @@ Nach dem ersten Lauf mit drei echten Teilen. Der Reihe nach:
    ausgeschaltet. Der Nutzer kennt die Versandkosten dafür noch nicht,
    deshalb ausdrücklich **später**. Wenn es soweit ist: `_fill_form` setzt
    `isInternationalShippingOn` auf `false` — das ist die Stelle.
-3. **Preis Schmutzfänger** — Programm sagte 38,90 €, der Nutzer hält 27–35 €
-   für richtig. Zu prüfen: Der Lauf mit Nummer `8T0853888F` (mit F) kam auf
-   38,90 €, der ohne F auf 28,90 €. Vermutlich zieht die Variante mit
-   Buchstabe teurere Vergleichsangebote heran. **Noch nicht untersucht.**
+3. ~~**Preis Schmutzfänger**~~ — **untersucht am 2026-08-08** (Abschnitt
+   „Preisbasis geschärft" weiter oben). Kurz: Der Verdacht war berechtigt, der
+   Fehler saß aber im Nummernfilter und traf das Steuergerät. Der Unterschied
+   38,90 € / 28,90 € stammt aus der eBay-Suche selbst; der Lauf **mit** F ist
+   der genauere. Ob 27–35 € stimmen, lässt sich nur an verkauften Artikeln
+   entscheiden — davon gab es zu dieser Nummer zu wenige.
 
 Erledigt aus derselben Rückmeldung: Hauptfoto (Nummernbilder ans Ende),
 Teilname „Steuergerät Feststellbremse", Versandstufe für Steuergeräte.

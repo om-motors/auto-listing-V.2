@@ -53,6 +53,11 @@ auf `lokal` zurück**, statt abzubrechen. Diese Rückfallebene nicht entfernen.
 - **Niemals veröffentlichen.** Nur Entwürfe speichern. In `draft.py` sperrt die
   Konstante `FORBIDDEN` jeden Klick auf „anbieten", „einstellen", „verkaufen".
   Diese Sperre darf nicht entfernt oder aufgeweicht werden.
+  Seit dem 2026-08-08 arbeitet das Browserprofil auf dem **echten
+  Verkäuferkonto `om.motors`**, nicht mehr auf dem Testkonto. Ein Fehlklick
+  steht damit im Konto des Nutzers, nicht in einem Bericht. Die Sperre wurde
+  in bisher keinem Lauf herausgefordert — sie ist also nicht erprobt, nur
+  vorhanden.
 - **CAPTCHAs werden nicht gelöst oder umgangen.** Bei einer Sicherheitsabfrage
   bricht die Pipeline mit `CaptchaBlocked` ab und bittet den Nutzer.
 - **Preise werden gerechnet, nicht geschätzt.** `compose.py` bildet den
@@ -60,8 +65,42 @@ auf `lokal` zurück**, statt abzubrechen. Diese Rückfallebene nicht entfernen.
   1,5-fachen Quartilsabstands weg. Kein Mittelwert: der Markt ist stark
   gespreizt (gemessen 140 € bis 1236 € für dasselbe Teil), da zieht ein
   Mittelwert nach oben.
+- **Der Nachsatzbuchstabe gehört zur Teilenummer.** In die Preisbasis kommen
+  nur Angebote mit *genau* dieser Nummer. Erst wenn es davon weniger als drei
+  gibt, zählen andere Ausführungen mit — und dann steht es im Bericht, samt
+  Aufzählung der fremden Nummern. Ohne diese Regel zahlt der Käufer für die
+  falsche Variante: Am Steuergerät `8K0907801J` führten 10 von 23
+  Vergleichsangeboten in Wahrheit `…801H`, `…801M`, `…801N`, `…801D`, `…801E`
+  oder `…801F` und hoben den Preis von 22,90 € auf 24,90 €.
 - **Kostenlos ist der Normalfall.** Neue Funktionen müssen ohne API auskommen
   oder sauber darauf verzichten können.
+
+## Benennen und Rechnen brauchen verschiedene Auswahlen
+
+Beides speist sich aus denselben eBay-Titeln, aber mit entgegengesetzter
+Anforderung — `compose._lokal()` hält sie deshalb auseinander:
+
+| | Auswahl | Warum |
+|---|---|---|
+| **Teilname, Modellcodes, Marke, Position, Versandstufe** | auch fremde Ausführungen | Ein `…801H` ist genauso ein „Steuergerät Feststellbremse". Je mehr Titel mitzählen, desto stabiler das Auszählen. |
+| **Preis** | nur die genaue Nummer | Der Nachsatzbuchstabe entscheidet über den Betrag. |
+
+Wer das wieder zusammenlegt, verliert eine der beiden Seiten: Mit der engen
+Auswahl fürs Benennen wurde aus „Steuergerät Feststellbremse" prompt
+„Feststellbremssteuergerät" — mit der weiten fürs Rechnen war der Preis 2 €
+zu hoch.
+
+## Tests
+
+Ohne zusätzliches Paket, mit dem eingebauten `unittest`:
+
+```bash
+.venv/bin/python -m unittest discover tests
+```
+
+Das Material in `tests/` sind **echte Angebotstitel aus `Berichte/`**, keine
+erfundenen. Wer die Preisrechnung anfasst, kann so gegen die vorhandenen
+Berichte gegenprüfen, statt zu raten.
 
 ## Erkenntnisse zur Texterkennung
 

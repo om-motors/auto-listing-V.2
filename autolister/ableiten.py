@@ -108,7 +108,46 @@ def _woerter(titel: str) -> List[str]:
     return re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", titel)
 
 
-def vergleichbare_angebote(angebote: List[Dict], teilenummer: str) -> List[int]:
+def _normiert(text: str) -> str:
+    """Leer- und Trennzeichen weg, damit '8K0 907 801 J' == '8K0907801J'."""
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+# Ab wie vielen Treffern die genaue Teilenummer für sich allein steht.
+MINDEST_EXAKT = 3
+
+
+def treffer_nach_nummer(angebote: List[Dict], teilenummer: str):
+    """(genau, gelockert) — Indexlisten der Angebote zu dieser Teilenummer.
+
+    **genau**: die Nummer steht vollständig im Titel, mit Nachsatzbuchstaben.
+    **gelockert**: zusätzlich die Angebote, bei denen nur der Stamm ohne den
+    Nachsatzbuchstaben passt — also andere Ausführungen desselben Teils.
+
+    Die zweite Liste ist eine Notlösung, keine Verbesserung. Der
+    Nachsatzbuchstabe unterscheidet echte Varianten, und die kosten
+    unterschiedlich viel. Am Steuergerät `8K0907801J` gemessen (Bericht vom
+    2026-08-07): von 23 Vergleichsangeboten führten nur 13 diese Nummer, die
+    übrigen 10 waren `…801H`, `…801M`, `…801N`, `…801D`, `…801E`, `…801F`.
+    Der Preis stieg dadurch von 22,90 € auf 24,90 €.
+    """
+    nummer = _normiert(teilenummer)
+    ohne_suffix = re.match(r"^(.*\d)[a-z]{1,2}$", nummer)
+    kurz = ohne_suffix.group(1) if ohne_suffix else None
+
+    genau, gelockert = [], []
+    for i, a in enumerate(angebote):
+        titel = _normiert(a.get("titel", ""))
+        if nummer and nummer in titel:
+            genau.append(i)
+            gelockert.append(i)
+        elif kurz and kurz in titel:
+            gelockert.append(i)
+    return genau, gelockert
+
+
+def vergleichbare_angebote(angebote: List[Dict], teilenummer: str,
+                           mindestens: int = MINDEST_EXAKT) -> List[int]:
     """Indizes der Angebote, die dieselbe Teilenummer im Titel führen.
 
     Das ist der verlässlichste Filter, den es ohne KI gibt: Wer die Nummer
@@ -119,22 +158,39 @@ def vergleichbare_angebote(angebote: List[Dict], teilenummer: str) -> List[int]:
     für einen Audi-Querträger (129 €) landeten so komplette Stoßstangen zu
     1450 € in der Preisbasis. Lieber ein dünner, richtiger Vergleich als ein
     breiter, falscher.
+
+    Deshalb zählt die **genaue** Nummer zuerst. Erst wenn davon weniger als
+    drei Angebote existieren, kommen die Varianten mit anderem
+    Nachsatzbuchstaben dazu — sonst bliebe ein selten angebotenes Teil ganz
+    ohne Preis. Ein Angebot vom 2026-07-30 zu `8K0807832A` hatte genau einen
+    Vergleich, und der schrieb die Nummer ohne das `A`. Wer die Lockerung
+    ersatzlos streicht, verliert diesen Preis.
     """
-    import re as _re
+    genau, gelockert = treffer_nach_nummer(angebote, teilenummer)
+    if len(genau) >= mindestens:
+        return genau
+    return gelockert
 
-    def normiert(text: str) -> str:
-        return _re.sub(r"[^a-z0-9]", "", (text or "").lower())
 
-    nummer = normiert(teilenummer)
-    ohne_suffix = _re.match(r"^(.*\d)[a-z]{1,2}$", nummer)
-    kurz = ohne_suffix.group(1) if ohne_suffix else None
+def fremde_nummern(angebote: List[Dict], indizes: List[int],
+                   teilenummer: str) -> List[str]:
+    """Welche abweichenden Varianten stehen in diesen Titeln?
 
-    passend = []
-    for i, a in enumerate(angebote):
-        titel = normiert(a.get("titel", ""))
-        if (nummer and nummer in titel) or (kurz and kurz in titel):
-            passend.append(i)
-    return passend
+    Für den Bericht: „mitgerechnet wurden auch 8K0907801N, 8K0907801H".
+    Damit sieht der Nutzer, worauf der Preis wirklich beruht.
+    """
+    nummer = _normiert(teilenummer)
+    ohne_suffix = re.match(r"^(.*\d)[a-z]{1,2}$", nummer)
+    if not ohne_suffix:
+        return []
+    muster = re.compile(re.escape(ohne_suffix.group(1)) + r"[a-z]{0,2}")
+    gefunden: List[str] = []
+    for i in indizes:
+        for treffer in muster.findall(_normiert(angebote[i].get("titel", ""))):
+            gross = treffer.upper()
+            if treffer != nummer and gross not in gefunden:
+                gefunden.append(gross)
+    return gefunden
 
 
 # Wörter, die vor den eigentlichen Teilnamen gehören, wenn die Vergleichstitel
