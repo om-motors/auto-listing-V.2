@@ -732,61 +732,62 @@ def create_draft(listing: Dict, vision: Dict, description: str,
             browser.close()
 
 
+def _kachel_adressen(page) -> list:
+    """Die Bildadressen der Vorschaukacheln — der einzige echte Nachweis.
+
+    Die Kacheln tragen ihr Bild als CSS-`background-image` von
+    `i.ebayimg.com`. Bearbeitet eBay ein Foto, liegt danach eine **andere**
+    Adresse dort. Damit lässt sich prüfen, was wirklich passiert ist, statt
+    Klicks zu zählen: Am 2026-08-07 meldete der Schritt „3 von 3", während im
+    Inserat nur ein Foto freigestellt war.
+    """
+    try:
+        return page.evaluate("""() =>
+          [...document.querySelectorAll('button.uploader-thumbnails-ux__image')]
+            .map(b => getComputedStyle(b).backgroundImage || '')
+            .filter(s => s.includes('ebayimg'))""") or []
+    except Exception:
+        return []
+
+
 def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
     """Bei jedem Foto eBays „Hintergrund entfernen" auslösen.
 
-    Aufbau des Editors, am echten Formular ermittelt (2026-08-07):
+    Aufbau, am echten Formular gemessen (2026-08-07):
 
-        button.uploader-thumbnails-ux__image        Vorschaukachel, öffnet ihn
-          [aria-label="Foto 1 bearbeiten oder ansehen"]
-        div[role=dialog].uploader-editor            der Editor selbst
-          button.icon-btn[title="Hintergrund entfernen"]
-          button.icon-btn[aria-label="Nächste Datei laden"]
-          button.btn--primary                       "Fertig"
+        button.uploader-thumbnails-ux__image      Vorschaukachel, öffnet Editor
+        div[role=dialog].uploader-editor          der Editor
+          button.icon-btn[title='Hintergrund entfernen']
+          button.btn--primary  "Speichern"        erscheint ERST danach
+          button.btn--primary  "Fertig"           im Normalzustand
 
-    **Der Editor wird nur einmal geöffnet.** Er hat Blätterknöpfe, mit denen
-    man von Foto zu Foto springt, ohne ihn zu schließen — bei neun Fotos spart
-    das rund zwei Drittel der Klicks und macht den Ablauf spürbar robuster.
+    **Zwei Fallen, beide teuer bezahlt:**
 
-    Gibt zurück, bei wie vielen Fotos der Knopf gedrückt wurde.
+    1. Nach dem Freistellen wechselt der Editor in einen Bestätigungszustand:
+       Die Blätterpfeile verschwinden, und „Fertig" wird durch „Abbrechen"
+       und „Speichern" ersetzt. Ohne den Klick auf „Speichern" wird das
+       Ergebnis **verworfen** — der Hintergrund war im Editor sichtbar weg,
+       im Inserat unverändert.
+    2. Das Blättern über die Pfeile ist nicht verlässlich: Der Schritt
+       meldete „3 von 3", tatsächlich wurde dreimal dasselbe Foto bearbeitet.
+       Deshalb wird jedes Foto **gezielt über seine Kachel** geöffnet. Mehr
+       Klicks, dafür weiß man, welches Foto man vor sich hat.
+
+    Gezählt wird nicht, wie oft geklickt wurde, sondern **wie viele
+    Kacheladressen sich geändert haben**.
     """
     kacheln = page.locator("button.uploader-thumbnails-ux__image")
     if not kacheln.count():
         warnings.append("Hintergrund entfernen: keine Fotokacheln gefunden")
         return 0
 
-    kacheln.first.scroll_into_view_if_needed(timeout=8000)
-    _dialoge_schliessen(page)
-    kacheln.first.click(timeout=8000)
-    _pause(page, 3000)
-
+    vorher = _kachel_adressen(page)
     editor = page.locator("div[role=dialog].uploader-editor")
-    try:
-        editor.wait_for(state="visible", timeout=10000)
-    except Exception:
-        warnings.append("Hintergrund entfernen: Foto-Editor ging nicht auf")
-        return 0
 
-    knopf = editor.locator("button.icon-btn[title='Hintergrund entfernen']")
-    weiter = editor.locator("button.icon-btn[aria-label='Nächste Datei laden']")
-
-    def klick_mit_geduld(ziel, sekunden: int = 45) -> bool:
-        """Klicken, bis es klappt — nicht einmal versuchen und aufgeben.
-
-        eBay legt beim Freistellen eine Sperrschicht über den Editor.
-        Playwright wartet dann darauf, dass der Knopf klickbar wird, und läuft
-        in seinen Timeout: „Blättern zu Foto 2 fehlgeschlagen (Timeout
-        6000 ms)". Genau daran blieb es am 2026-08-07 bei **einem** Foto je
-        Teil hängen.
-
-        Ein Sichtbarkeitstest hilft hier nicht: Ein überdecktes Element gilt
-        weiterhin als sichtbar und nicht gesperrt. Nur der Klick selbst weiß,
-        ob er durchkommt.
-        """
-        # Publish-Sperre gilt auch hier: einmal prüfen, dann erst hämmern.
+    def geduldig(ziel, sekunden: int = 45) -> bool:
         beschriftung = _beschriftung(ziel)
         if beschriftung and FORBIDDEN.search(beschriftung):
-            warnings.append("Foto-Editor: Klick auf '%s' blockiert "
+            warnings.append("Foto-Editor: Klick auf %r blockiert "
                             "(würde veröffentlichen!)" % beschriftung[:60])
             return False
         ende = time.time() + sekunden
@@ -798,50 +799,7 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
                 page.wait_for_timeout(900)
         return False
 
-    def warte_bis_bereit(sekunden: int = 40) -> bool:
-        """Warten, bis der Editor wieder bedienbar ist.
-
-        **Nicht über eine feste Pause.** eBay rechnet das Freistellen
-        serverseitig und sperrt so lange die Bedienelemente. Am 2026-08-07
-        stand hier `_pause(page, 3500)` — mit dem Tempo-Regler also 2,1 s, und
-        das war zu kurz: Der Weiterblättern-Knopf war noch gesperrt, die
-        Schleife brach ab und es wurde bei jedem Teil nur **ein** Foto
-        bearbeitet ("1 von 3", "1 von 2", "1 von 4").
-
-        Die Wartezeit hängt bewusst **nicht** am Tempo-Regler: Hier wird auf
-        einen fremden Server gewartet, nicht auf das Nachzeichnen der Seite.
-        """
-        ende = time.time() + sekunden
-        while time.time() < ende:
-            try:
-                if (weiter.count() and weiter.first.is_visible()
-                        and not weiter.first.is_disabled()):
-                    return True
-                # Beim letzten Foto ist "weiter" dauerhaft gesperrt — dann
-                # zählt, ob der Hintergrund-Knopf wieder ansprechbar ist.
-                if (knopf.count() and knopf.first.is_visible()
-                        and not knopf.first.is_disabled()):
-                    return True
-            except Exception:
-                pass
-            page.wait_for_timeout(700)
-        return False
-
-    # Der Editor wechselt nach dem Freistellen in einen Bestätigungszustand.
-    # Am 2026-08-07 live nachgemessen:
-    #
-    #   vorher:  [Pfeile] … [Hintergrund entfernen]   [Fertig]
-    #   danach:  [keine Pfeile] …                     [Abbrechen] [Speichern]
-    #
-    # **Ohne den Klick auf „Speichern" wird das Ergebnis verworfen.** Genau
-    # das passierte: Der Hintergrund war im Editor sichtbar entfernt, im
-    # Inserat aber unverändert. Und weil die Pfeile in diesem Zustand ganz
-    # verschwinden (`count() == 0`), las die alte Schleife das als „letztes
-    # Foto erreicht" und brach still ab — daher „1 von 3" bei jedem Teil.
-    speichern = editor.locator("button.btn--primary",
-                               has_text=re.compile(r"^\s*Speichern\s*$"))
-
-    def warte_auf(ziel, sekunden: int = 30) -> bool:
+    def warte_auf(ziel, sekunden: int = 60) -> bool:
         ende = time.time() + sekunden
         while time.time() < ende:
             try:
@@ -852,60 +810,67 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
             page.wait_for_timeout(600)
         return False
 
-    bearbeitet = 0
-    for i in range(anzahl):
+    for i in range(min(anzahl, kacheln.count())):
+        kachel = kacheln.nth(i)
+        try:
+            kachel.scroll_into_view_if_needed(timeout=6000)
+        except Exception:
+            pass
+        _dialoge_schliessen(page)
+        if not geduldig(kachel, sekunden=20):
+            warnings.append("Hintergrund entfernen: Foto %d ließ sich nicht "
+                            "öffnen" % (i + 1))
+            continue
+        if not warte_auf(editor, sekunden=15):
+            warnings.append("Hintergrund entfernen: Editor ging bei Foto %d "
+                            "nicht auf" % (i + 1))
+            continue
+
+        knopf = editor.locator("button.icon-btn[title='Hintergrund entfernen']")
+        speichern = editor.locator(
+            "button.btn--primary", has_text=re.compile(r"^\s*Speichern\s*$"))
+        fertig = editor.locator(
+            "button.btn--primary", has_text=re.compile(r"^\s*Fertig\s*$"))
+
         if not knopf.count():
-            warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d" % (i + 1))
-        elif not klick_mit_geduld(knopf.first):
+            warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d"
+                            % (i + 1))
+        elif not geduldig(knopf.first):
             warnings.append("Hintergrund entfernen: Foto %d ließ sich nicht "
                             "freistellen" % (i + 1))
-        elif not warte_auf(speichern):
+        elif not warte_auf(speichern, sekunden=60):
             warnings.append("Hintergrund entfernen: bei Foto %d kam kein "
                             "Speichern-Knopf" % (i + 1))
-        elif not klick_mit_geduld(speichern.first):
-            warnings.append("Hintergrund entfernen: Foto %d ließ sich nicht "
-                            "speichern" % (i + 1))
         else:
-            bearbeitet += 1
+            # **Der Speichern-Knopf erscheint, BEVOR eBay fertig gerechnet
+            # hat.** Wer sofort drückt, speichert das unbearbeitete Bild —
+            # genau das passierte am 2026-08-07: Die Kacheladresse änderte
+            # sich (also wurde gespeichert), der Hintergrund war aber noch da.
+            # Im Handversuch mit acht Sekunden Pause davor saß es sofort.
+            page.wait_for_timeout(8000)
+            if not geduldig(speichern.first):
+                warnings.append("Hintergrund entfernen: Foto %d ließ sich "
+                                "nicht speichern" % (i + 1))
+            else:
+                page.wait_for_timeout(6000)   # eBay lädt das Bild neu
+                warte_auf(fertig, sekunden=60)
 
-        if i + 1 >= anzahl:
-            break
-        # Erst wenn die Pfeile zurück sind, ist der Editor wieder normal.
-        # Großzügig: eBay lädt das freigestellte Bild danach neu, und das
-        # dauert länger als das Freistellen selbst.
-        if not warte_auf(weiter, sekunden=60):
-            warnings.append("Hintergrund entfernen: nach Foto %d kamen die "
-                            "Blätterpfeile nicht zurück" % (i + 1))
-            break
-        if not klick_mit_geduld(weiter.first):
-            warnings.append("Hintergrund entfernen: Blättern zu Foto %d "
-                            "klappte nicht" % (i + 2))
-            break
-        _pause(page, 1200)
-
-    # Editor sicher schließen und das auch nachprüfen.
-    #
-    # Bleibt er offen, liegt er über dem ganzen Formular und lässt jeden
-    # folgenden Schritt scheitern — am 2026-08-07 fiel dadurch der Zustand
-    # „Gebraucht" aus, ohne dass die Ursache im Bericht zu erkennen war.
-    fertig = editor.locator("button.btn--primary",
-                            has_text=re.compile(r"^\s*Fertig\s*$"))
-    for versuch in range(3):
-        if not editor.count() or not editor.first.is_visible():
-            break
-        if fertig.count() and klick_mit_geduld(fertig.first, sekunden=20):
-            _pause(page, 2000)
-            continue
-        page.keyboard.press("Escape")
+        # Editor wieder zumachen, damit die nächste Kachel anklickbar ist.
+        for _ in range(3):
+            if not editor.count() or not editor.first.is_visible():
+                break
+            if fertig.count() and geduldig(fertig.first, sekunden=15):
+                _pause(page, 1500)
+                continue
+            page.keyboard.press("Escape")
+            _pause(page, 1200)
         _pause(page, 1500)
-    else:
-        if editor.count() and editor.first.is_visible():
-            warnings.append("Hintergrund entfernen: Foto-Editor ließ sich nicht "
-                            "schließen — folgende Schritte können daran scheitern")
-    _pause(page, 1200)
 
-    log.info("Hintergrund entfernt: %d von %d Foto(s)", bearbeitet, anzahl)
-    return bearbeitet
+    nachher = _kachel_adressen(page)
+    geaendert = sum(1 for a, b in zip(vorher, nachher) if a != b)
+    log.info("Hintergrund entfernt: %d von %d Foto(s) (an den Kacheladressen "
+             "nachgeprüft)", geaendert, anzahl)
+    return geaendert
 
 
 def _kategorie_waehlen(page, warnings: List[str]) -> bool:

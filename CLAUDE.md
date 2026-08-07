@@ -203,6 +203,37 @@ der Blick in den Editor selbst: `iframe#se-rte-frame__summary` → `body`.
 in einem `<img>` — wer sie zählt, findet null, während drei Fotos sichtbar
 hochgeladen sind.
 
+**Der Foto-Editor: „Hintergrund entfernen"**
+
+Er hat drei Fallen, jede einzeln teuer bezahlt (2026-08-07):
+
+```
+button.uploader-thumbnails-ux__image       Kachel, öffnet den Editor
+div[role=dialog].uploader-editor           der Editor
+  button.icon-btn[title='Hintergrund entfernen']
+  button.btn--primary  "Speichern"         erscheint ERST nach dem Klick
+  button.btn--primary  "Fertig"            im Normalzustand
+```
+
+1. **Ohne „Speichern" wird das Ergebnis verworfen.** Nach dem Freistellen
+   wechselt der Editor in einen Bestätigungszustand: Die Blätterpfeile
+   verschwinden, „Fertig" wird durch „Abbrechen"/„Speichern" ersetzt.
+2. **Nicht über die Pfeile blättern.** Der Schritt meldete „3 von 3",
+   tatsächlich wurde dreimal dasselbe Foto bearbeitet. Jedes Foto gezielt
+   über seine Kachel öffnen — mehr Klicks, dafür weiß man, wo man ist.
+3. **Der Speichern-Knopf erscheint, bevor eBay fertig gerechnet hat.** Wer
+   sofort drückt, speichert das unbearbeitete Bild: Die Kacheladresse ändert
+   sich, der Hintergrund bleibt. Nach dem Freistellen **acht Sekunden fest
+   warten**, dann erst speichern.
+
+**Der Nachweis geht über die Kacheladressen**, nicht über gezählte Klicks:
+Die Kacheln tragen ihr Bild als CSS-`background-image` von `i.ebayimg.com`,
+und nach einer echten Bearbeitung steht dort eine andere Adresse.
+
+**Grenze des Werkzeugs:** Bei Nahaufnahmen mit Hand oder unruhigem
+Hintergrund kann eBay das Teil nicht isolieren — dort bleibt der Hintergrund,
+egal wie oft man klickt. Das ist kein Fehler der Automation.
+
 **Anzeigentarif, Rücknahme, Versand**
 
 - Anzeigentarif: erst `div.promoted-listing-simple input[role=switch]`

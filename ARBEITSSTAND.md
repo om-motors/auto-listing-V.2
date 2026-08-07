@@ -50,6 +50,42 @@ Ein Audi-Schmutzfänger (`8T0853888`), 4 Fotos. Drei Fehler, alle behoben:
 
 ---
 
+## Stand 2026-08-07, Abend — vor dem Fork/Clear
+
+Die Kette **Handy → Cloudflare → Supabase → Mac → eBay-Entwurf** läuft
+vollständig und unbeaufsichtigt. Ein Durchlauf dauert rund 2–3 Minuten je
+Teil, mit Freistellen entsprechend länger.
+
+**Was heute erledigt wurde**
+
+| | |
+|---|---|
+| Web-App | Cloudflare Workers, `auto-listing.o-guelues.workers.dev`. Netlify abgeschaltet. |
+| Automatik | launchd-Dienst `de.ommotors.autolisting.cloud`, fragt alle 30 s nach. Ordner-Watcher ist aus (Browserprofil-Konflikt). |
+| Volle Auflösung | `accept` mit HEIC — iOS verkleinerte sonst auf 1600 px |
+| Gruppierung | über Teilenummern, 9 von 9 an echten Fotos |
+| Hauptfoto | über `zuschnitt.hauptfoto_note()`, 3 von 3 |
+| Zuschnitt | lokal vor dem Upload, Originale bleiben unberührt |
+| Hintergrund | funktioniert; Grenzen siehe `CLAUDE.md` |
+| Tempo | Foto-Upload-Timeout (110 s je Teil) beseitigt, Regler `AUTOLISTER_TEMPO` |
+
+**Was noch offen ist**
+
+1. **Nahaufnahmen lassen sich nicht freistellen** — eBay kann das Teil dort
+   nicht isolieren. Keine Fehlfunktion, aber der Bericht meldet es als
+   „N von M". Vielleicht sollten solche Fotos gar nicht erst versucht werden.
+2. **Preis Schmutzfänger** — Programm 38,90 €, Nutzer hält 27–35 € für
+   richtig. Verdacht: Nummern mit Buchstabensuffix (`8T0853888F`) ziehen
+   teurere Vergleichsangebote. Noch nicht untersucht.
+3. **Internationaler Versand** soll später AN — derzeit bewusst aus.
+   Stelle: `isInternationalShippingOn` in `_fill_form`.
+4. Aus dem Audit unverändert offen: A7 (implizites Submit durch Enter),
+   E2 (Captcha-Erkennung nur per URL), E3 (Bericht bei Abbruch).
+5. **Konto ist noch `samekili9`** (Test). Umstellen auf `om.motors` mit
+   `python -m autolister.login`.
+
+---
+
 ## Offene Wünsche des Nutzers (Rückmeldung 2026-08-07)
 
 Nach dem ersten Lauf mit drei echten Teilen. Der Reihe nach:
