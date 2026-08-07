@@ -37,7 +37,7 @@ def _arbeitsordner(auftrag: Dict) -> Path:
     return ordner
 
 
-def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
+def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False, page=None) -> None:
     """Einen Auftrag von Anfang bis Ende. Fehler landen im Auftrag, nicht hier."""
     kennung = str(auftrag["id"])[:8]
     ordner = _arbeitsordner(auftrag)
@@ -77,7 +77,11 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
         # "Handy-Auftrag <id>" ist mit über 17 Zeichen sicher außerhalb.
         name = (auftrag.get("bezeichnung") or "").strip() or ("Handy-Auftrag " + kennung)
 
-        ergebnis = pipeline.verarbeite_gruppe(fotos, dry_run=dry_run, name=name)
+        if page is not None:
+            ergebnis = pipeline.verarbeite_gruppe_auf_seite(
+                page, fotos, dry_run=dry_run, name=name)
+        else:
+            ergebnis = pipeline.verarbeite_gruppe(fotos, dry_run=dry_run, name=name)
 
         listing = ergebnis["listing"]
         result = ergebnis["result"]
@@ -120,15 +124,35 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
 
 
 def warteschlange_leeren(dry_run: bool = False) -> int:
-    """Alle offenen Aufträge abarbeiten. Gibt zurück, wie viele es waren."""
+    """Alle offenen Aufträge abarbeiten — in EINEM Browser.
+
+    Ein Handy-Upload mit drei Teilen erzeugt drei Aufträge. Für jeden einen
+    eigenen Browser zu starten kostet je rund vier Sekunden plus kalten
+    eBay-Cache; hier fällt es einmal an.
+    """
+    auftrag = cloud.naechster_auftrag()
+    if not auftrag:
+        return 0
+
     anzahl = 0
-    while True:
-        auftrag = cloud.naechster_auftrag()
-        if not auftrag:
-            return anzahl
-        anzahl += 1
-        log.info("Auftrag %s übernommen", str(auftrag["id"])[:8])
-        auftrag_verarbeiten(auftrag, dry_run)
+    with pipeline.browser_sitzung() as page:
+        while auftrag:
+            anzahl += 1
+            log.info("Auftrag %s übernommen", str(auftrag["id"])[:8])
+            auftrag_verarbeiten(auftrag, dry_run, page=page)
+
+            # Lebt der Browser noch? Ist er abgestürzt, würde jeder weitere
+            # Auftrag sofort scheitern und fälschlich als "fehler" markiert.
+            # Dann lieber abbrechen — der nächste Durchgang öffnet einen
+            # frischen Browser und nimmt die Aufträge erneut.
+            try:
+                _ = page.url
+            except Exception:
+                log.warning("Browser nicht mehr ansprechbar — Rest beim "
+                            "nächsten Durchgang")
+                break
+            auftrag = cloud.naechster_auftrag()
+    return anzahl
 
 
 def _selbsttest() -> bool:

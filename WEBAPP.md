@@ -97,12 +97,12 @@ kann sie deine Fotos nirgendwo anders hinschicken.
 Adresse aufs Handy, in Safari **Teilen → Zum Home-Bildschirm**. Dann startet
 sie wie eine App.
 
-> **Netlify funktioniert weiterhin.** Die Konfiguration in
-> [`netlify.toml`](netlify.toml) bleibt liegen, falls du den Weg noch brauchst.
-> Dort ist `base = "web"` gesetzt — sonst findet Netlify die `requirements.txt`
-> der Pipeline und scheitert daran, `pyobjc-framework-Vision` auf Linux zu
-> bauen. Bei Cloudflare stellt sich die Frage nicht: dort wird gar nichts
-> installiert.
+> **Netlify ist abgeschaltet** (2026-08-07). Die `netlify.toml` wurde entfernt.
+> Falls das Projekt im Netlify-Konto noch existiert: **Site configuration →
+> Danger zone → Delete this project**. Solange es existiert, versucht es bei
+> jedem Push zu bauen und scheitert — ohne Konfigurationsdatei findet es die
+> `requirements.txt` der Pipeline und will `pyobjc-framework-Vision` auf Linux
+> bauen. Schadet nichts, macht aber Lärm.
 
 ### 5. Selbsttest
 

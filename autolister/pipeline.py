@@ -23,6 +23,7 @@ import shutil
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -263,6 +264,35 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict
     # zurückschreiben kann, ohne den Bericht wieder auseinanderzunehmen.
     return {"bericht": bericht, "vision": vis, "listing": listing,
             "result": result, "research": res}
+
+
+@contextmanager
+def browser_sitzung():
+    """Einen Browser für mehrere Produkte offen halten.
+
+    Für jedes Teil einen eigenen Browser zu starten kostet je rund vier
+    Sekunden plus kalten eBay-Cache. Bei einem Handy-Upload mit drei Teilen
+    fällt das dreimal an. Phase 2 der Pipeline macht es intern längst
+    richtig — der Cloud-Arbeiter bekommt hier denselben Zugang.
+    """
+    with sync_playwright() as p:
+        browser = draft.open_browser(p)
+        page = browser.pages[0] if browser.pages else browser.new_page()
+        try:
+            yield page
+        finally:
+            browser.close()
+
+
+def verarbeite_gruppe_auf_seite(page, photos: List[Path], dry_run: bool = False,
+                                name: Optional[str] = None) -> Dict:
+    """Wie `verarbeite_gruppe`, aber auf einer bereits offenen Seite."""
+    config.ensure_dirs()
+    produkt = _analyze(Produkt(
+        photos=photos, name=name or photos[0].parent.name or "produkt"))
+    if produkt.error:
+        raise produkt.error
+    return _process_with_browser(page, produkt, dry_run)
 
 
 def verarbeite_gruppe(photos: List[Path], dry_run: bool = False,

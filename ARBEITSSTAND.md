@@ -17,7 +17,10 @@ Letzte Aktualisierung: 2026-08-01 (nach dem ersten Echtlauf)
 Netlify + Supabase sind eingerichtet und getestet: Upload vom Handy →
 Supabase → Mac → eBay-Formular. Die Kette **funktioniert**.
 
-- Supabase-Projekt `dsjfxlxqskhcezmsvafx`, Seite auf `…listing-v2.netlify.app`
+- Supabase-Projekt `dsjfxlxqskhcezmsvafx`, Seite auf **Cloudflare Workers**:
+  `https://auto-listing.o-guelues.workers.dev` (Konto `9d9066dd…`, wie
+  `autoteilewawi`). Neu veröffentlichen mit `npx wrangler deploy`.
+  Netlify ist seit 2026-08-07 abgeschaltet.
 - `cloud_worker --pruefen` meldet alles grün
 - Der Arbeiter läuft **noch nicht als Dienst** — bisher von Hand gestartet
 - Der alte Ordner-Watcher (`Eingang/`) läuft weiter parallel. Vor dem

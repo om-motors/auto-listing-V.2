@@ -10,6 +10,7 @@ Buttons, die veröffentlichen würden ("Artikel anbieten", "... einstellen",
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -39,6 +40,26 @@ FORBIDDEN = re.compile(
     r"|kostenpflichtig|gebühren|gebuehren"
     r"|list (it|item|for free)|sell it|publish|confirm and list|submit listing",
     re.IGNORECASE)
+
+
+# Wie großzügig gewartet wird. eBay reagiert träge, deshalb stehen im Formular
+# an vielen Stellen feste Pausen — zusammen rund 45 Sekunden, einige davon
+# mehrfach je Durchlauf (allein die Artikelmerkmale viermal).
+#
+# Sie alle hängen an diesem Regler. **1.0 sind die Werte, unter denen die
+# Trockenläufe vom 2026-08-02 sauber durchliefen.** Kleiner ist schneller und
+# riskanter.
+#
+# Woran man merkt, dass man zu weit gekürzt hat: Im Bericht tauchen wieder
+# Punkte unter „Im eBay-Entwurf noch von Hand setzen" auf, obwohl die Werte
+# im Entwurf stehen. Dann liest die Kontrolle, bevor eBay den Wert übernommen
+# hat. In dem Fall über AUTOLISTER_TEMPO in der .env wieder hochsetzen.
+TEMPO = max(0.3, float(os.environ.get("AUTOLISTER_TEMPO", "0.6")))
+
+
+def _pause(page, millisekunden: int) -> None:
+    """Feste Wartezeit, über TEMPO regelbar. Nie unter 200 ms."""
+    page.wait_for_timeout(max(200, int(millisekunden * TEMPO)))
 
 
 class NotLoggedIn(RuntimeError):
@@ -329,7 +350,7 @@ def _felder_stimmen(page, **erwartet: str) -> bool:
             return True
         abweichung = "; ".join(fehler)
         if versuch < 2:
-            page.wait_for_timeout(1200)
+            _pause(page, 1200)
     _LETZTE_ABWEICHUNG = abweichung
     return False
 
@@ -409,7 +430,7 @@ def _dialoge_schliessen(page, warnings: Optional[List[str]] = None) -> int:
                 if knopf.count() and knopf.is_visible():
                     if _safe_click(page, knopf, notiz, "Dialog '%s'" % beschriftung):
                         geschlossen += 1
-                        page.wait_for_timeout(600)
+                        _pause(page, 600)
             except Exception:
                 continue
 
@@ -427,7 +448,7 @@ def _dialoge_schliessen(page, warnings: Optional[List[str]] = None) -> int:
             if _safe_click(page, knopf, notiz, "Hinweisfenster schließen"):
                 geschlossen += 1
 
-        page.wait_for_timeout(500)
+        _pause(page, 500)
         if geschlossen == vorher:
             break
     return geschlossen
@@ -462,14 +483,17 @@ def _formular_bereit(page, warnings: List[str]) -> bool:
           const schritt = window.innerHeight * 0.8;
           for (let y = 0; y < document.body.scrollHeight; y += schritt) {
             window.scrollTo(0, y);
-            await new Promise(r => setTimeout(r, 250));
+            await new Promise(r => setTimeout(r, 140));
           }
           window.scrollTo(0, 0);
-          await new Promise(r => setTimeout(r, 400));
+          await new Promise(r => setTimeout(r, 300));
         }""")
     except Exception:
         pass
-    _settle(page, 10000)
+    # Kurz halten: `_settle` wartet auf Netzwerkruhe, und die tritt auf dem
+    # Verkaufsformular nie ein — eBay fragt dauernd nach. Die Wartezeit lief
+    # deshalb praktisch immer voll ab. 10 s waren hier reine Verschwendung.
+    _settle(page, 3000)
     return True
 
 
@@ -526,7 +550,7 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
     knopf.scroll_into_view_if_needed(timeout=8000)
     _dialoge_schliessen(page)
     knopf.click(timeout=8000)
-    page.wait_for_timeout(1500)
+    _pause(page, 1500)
 
     # Das Eingabefeld MUSS aus derselben Zeile stammen. Ein globales `.first`
     # traf nach dem ersten gesetzten Merkmal weiterhin dessen Feld, weshalb
@@ -545,7 +569,7 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
         feld.wait_for(state="visible", timeout=6000)
     feld.click(timeout=6000)
     feld.press_sequentially(str(wert), delay=110)
-    page.wait_for_timeout(1800)
+    _pause(page, 1800)
 
     # Exakten Vorschlag anklicken, falls einer angeboten wird
     vorschlag = page.get_by_role("option", name=str(wert), exact=True).first
@@ -553,15 +577,15 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
         vorschlag.click(timeout=4000)
     else:
         feld.press("Enter")
-    page.wait_for_timeout(1800)
+    _pause(page, 1800)
     page.keyboard.press("Escape")
-    page.wait_for_timeout(800)
+    _pause(page, 800)
 
     # Wert zurücklesen — mit Rückfallebenen, weil beides schiefgehen kann:
     # sobald ein Merkmal gefüllt ist, entfernt eBay dessen aria-label (das
     # erneute Suchen findet nichts), und beim Pflichtfeld "Hersteller" baut
     # eBay die Merkmalliste neu auf (der alte Elementzeiger wird ungültig).
-    page.wait_for_timeout(1200)
+    _pause(page, 1200)
     for versuch in range(3):
         try:
             text = (knopf.inner_text(timeout=3000) or "").strip()
@@ -579,7 +603,7 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
                 knopf = neu
             except Exception:
                 pass
-        page.wait_for_timeout(900)
+        _pause(page, 900)
 
     # Hier stand früher eine letzte Rückfallebene, die fragte, ob IRGENDEIN
     # Merkmalknopf diesen Wert anzeigt — und bei einem Treffer "gesetzt"
@@ -736,12 +760,12 @@ def _kategorie_waehlen(page, warnings: List[str]) -> bool:
                         "im Entwurf von Hand setzen")
         return False
 
-    page.wait_for_timeout(1500)
+    _pause(page, 1500)
     fertig = page.get_by_role(
         "button", name=re.compile(r"^\s*Fertig\s*$", re.I)).first
     if fertig.count():
         _safe_click(page, fertig, warnings, "Kategorie übernehmen")
-        page.wait_for_timeout(2000)
+        _pause(page, 2000)
     log.info("Kategorie gewählt: %s", gewaehlt[:80])
     return True
 
@@ -800,7 +824,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         if "draftId" in page.url or "/lstng" in page.url:
             break
         _kategorie_waehlen(page, warnings)
-        page.wait_for_timeout(500)
+        _pause(page, 500)
     if "draftId" not in page.url and "/lstng" not in page.url:
         raise DraftError("Verkaufsformular wurde nicht erreicht (URL: %s)" % page.url)
     draft_url = page.url
@@ -816,7 +840,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         for _ in range(10):
             if "draftId" in (page.url or ""):
                 return page.url
-            page.wait_for_timeout(700)
+            _pause(page, 700)
         return page.url
 
     # Der Wechsel-Dialog erscheint sofort nach dem Anlegen des Entwurfs und
@@ -984,7 +1008,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 if _gleich(gelesen, value):
                     return True
                 if versuch < 2:
-                    page.wait_for_timeout(1000)
+                    _pause(page, 1000)
             _LETZTE_ABWEICHUNG = ("erwartet %r; beim Setzen %r, beim Zurücklesen %r"
                                   % (value, gesetzte_werte.get(label, ""), gelesen))
             return False
@@ -1002,7 +1026,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         if not auswahl.count():
             raise RuntimeError("Auswahlfeld 'Format' nicht gefunden")
         auswahl.select_option("FixedPrice", timeout=8000)
-        page.wait_for_timeout(1200)
+        _pause(page, 1200)
     _step(warnings, "Angebotsformat Sofort-Kaufen", set_format,
           lambda: _felder_stimmen(page, format="FixedPrice"))
 
@@ -1038,7 +1062,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         schalter.scroll_into_view_if_needed(timeout=8000)
         _dialoge_schliessen(page)
         schalter.click(timeout=8000)
-        page.wait_for_timeout(1500)
+        _pause(page, 1500)
     _step(warnings, "Preisvorschläge zulassen", enable_best_offer,
           lambda: _felder_stimmen(page, bestOfferEnabled="true"))
 
@@ -1054,7 +1078,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         schalter.scroll_into_view_if_needed(timeout=8000)
         if not schalter.is_checked():
             schalter.click(timeout=8000)
-            page.wait_for_timeout(2500)
+            _pause(page, 2500)
 
         # Die Schnellauswahl kennt nur 8/10/12 %. Für 2 % braucht es das
         # Freitextfeld hinter "Eigenen Anzeigentarif auswählen".
@@ -1064,7 +1088,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 "button", name=re.compile("Eigenen Anzeigentarif", re.I)).first
         eigen.scroll_into_view_if_needed(timeout=8000)
         eigen.click(timeout=8000)
-        page.wait_for_timeout(1800)
+        _pause(page, 1800)
 
         feld = page.locator(
             "input[aria-label*='Anzeigentarif' i], input[aria-label*='Prozent' i]").last
@@ -1075,7 +1099,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         feld.fill("")
         feld.press_sequentially(config.ANZEIGENTARIF_PROZENT, delay=120)
         page.keyboard.press("Tab")
-        page.wait_for_timeout(1500)
+        _pause(page, 1500)
 
     def bewerben_kontrolle():
         # Beides zusammen: der Schalter muss an sein UND der eigene Tarif
@@ -1105,7 +1129,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         karte.scroll_into_view_if_needed(timeout=8000)
         _dialoge_schliessen(page)
         karte.click(timeout=8000)
-        page.wait_for_timeout(3000)
+        _pause(page, 3000)
 
         # 1) Inlandsrücknahme einschalten (Schalter mit Label im Dialog)
         beschriftung = page.locator(
@@ -1115,7 +1139,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 re.compile(r"Rücknahme im Inland", re.I)).first
         beschriftung.scroll_into_view_if_needed(timeout=6000)
         beschriftung.click(timeout=8000)
-        page.wait_for_timeout(2000)
+        _pause(page, 2000)
 
         def waehle(beschreibung: str, muster, feldname: str, sollwert: str) -> None:
             """Eine Option im Rücknahme-Dialog setzen — und sagen, wenn es nicht ging.
@@ -1132,7 +1156,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             try:
                 if treffer.count() and treffer.is_visible():
                     treffer.click(timeout=5000)
-                    page.wait_for_timeout(700)
+                    _pause(page, 700)
                     if _formularwerte(page).get(feldname) == sollwert:
                         return
             except Exception:
@@ -1141,7 +1165,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             try:
                 if liste.count():
                     liste.select_option(sollwert, timeout=5000)
-                    page.wait_for_timeout(700)
+                    _pause(page, 700)
                     return
             except Exception:
                 pass
@@ -1166,7 +1190,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
         if fertig.count() and fertig.is_visible():
             _safe_click(page, fertig, warnings, "Rücknahme übernehmen")
-            page.wait_for_timeout(2500)
+            _pause(page, 2500)
 
     def ruecknahme_kontrolle():
         # Alle drei Vorgaben prüfen, nicht nur eine. Vorher stand hier
@@ -1194,7 +1218,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         schalter.scroll_into_view_if_needed(timeout=8000)
         _dialoge_schliessen(page)
         schalter.click(timeout=8000)
-        page.wait_for_timeout(1500)
+        _pause(page, 1500)
     _step(warnings, "Kein internationaler Versand", kein_auslandsversand,
           lambda: _felder_stimmen(page, isInternationalShippingOn="false"))
 
@@ -1217,7 +1241,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         knopf.scroll_into_view_if_needed(timeout=8000)
         _dialoge_schliessen(page)
         knopf.click(timeout=8000)
-        page.wait_for_timeout(3000)
+        _pause(page, 3000)
 
         # Im Dialog das erste sichtbare Betragsfeld füllen
         feld = page.locator(
@@ -1230,7 +1254,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         feld.click(timeout=6000)
         feld.fill("")
         feld.press_sequentially(preis, delay=110)
-        page.wait_for_timeout(1000)
+        _pause(page, 1000)
 
         fertig = page.locator("button.btn--primary", has_text=re.compile(
             r"^\s*(Fertig|Übernehmen|Speichern|OK)\s*$", re.I)).first
@@ -1239,7 +1263,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
         if fertig.count() and fertig.is_visible():
             _safe_click(page, fertig, warnings, "Versanddialog schließen")
-            page.wait_for_timeout(2500)
+            _pause(page, 2500)
 
     def versand_kontrolle():
         return _betrag(listing["versandpreis"]) in _abschnitt_text(page, r"Wer zahlt")
@@ -1291,7 +1315,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
     if not saved:
         raise DraftError("Speichern-Button nicht gefunden — Entwurf existiert aber "
                          "vermutlich schon unter ebay.de/sh/lst/drafts (Auto-Save).")
-    page.wait_for_timeout(4000)
+    _pause(page, 4000)
 
     # --- Kontrolle: ist es ein Entwurf GEBLIEBEN? ---
     # Ohne diese Prüfung sähe ein versehentlich eingestelltes Inserat im Bericht
