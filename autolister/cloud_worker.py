@@ -52,7 +52,7 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False, page=None) -> None
         # eigenen Auftrag anlegen und hier nur das erste bearbeiten. So kann
         # der Nutzer einen ganzen Rundgang auf einmal hochladen.
         wo_liegt = {str(lokal): fern for lokal, fern in zip(fotos, speicherpfade)}
-        gruppen = gruppieren.nach_aufnahmezeit(fotos)
+        gruppen = gruppieren.aufteilen(fotos)
         if len(gruppen) > 1:
             for weiteres_teil in gruppen[1:]:
                 pfade = [wo_liegt[str(p)] for p in weiteres_teil if str(p) in wo_liegt]

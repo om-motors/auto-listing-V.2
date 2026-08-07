@@ -4,23 +4,35 @@ Der Nutzer lädt alle Fotos eines Rundgangs auf einmal hoch — Schmutzfänger,
 Feststellbremse, Armaturenbrett — und das Programm soll selbst erkennen,
 welche Bilder zu welchem Teil gehören.
 
-**Das verlässlichste Merkmal ist die Aufnahmezeit.** Wer ein Teil
-fotografiert, macht drei, vier Bilder in wenigen Sekunden, geht dann zum
-nächsten Teil und braucht dafür mindestens eine halbe Minute. Diese Pausen
-sind die Trennlinien. Das funktioniert ohne KI, ohne Kosten und ohne dass
-auf jedem Foto die Teilenummer lesbar sein muss.
+**Maßgeblich ist die Teilenummer**, nicht die Aufnahmezeit.
 
-Warum nicht über die Teilenummer gruppieren? Weil sie nur auf einem oder zwei
-Bildern je Teil überhaupt zu sehen ist. Die Übersichtsfotos ließen sich damit
-nicht zuordnen — und gerade die braucht das Inserat.
+Ursprünglich lief das über die EXIF-Aufnahmezeit: Wer ein Teil fotografiert,
+macht drei, vier Bilder in Sekunden und braucht dann eine halbe Minute bis zum
+nächsten — diese Pausen wären die Trennlinien. **Das scheitert am
+Handy-Upload.** Am 2026-08-07 nachgemessen: iOS streift beim Hochladen über
+ein `<input type=file>` sämtliche EXIF-Daten ab. Alle neun Fotos eines Uploads
+trugen nur noch die Downloadzeit im Sekundenabstand, und alle drei Teile
+landeten in einem einzigen Inserat.
+
+Die Teilenummer überlebt das, denn sie steht auf dem Teil selbst. Der Einwand
+gegen dieses Verfahren war, dass sie nur auf ein, zwei Bildern je Teil zu
+sehen ist — das stimmt, ist aber lösbar: Die Fotos mit Nummer sind die
+Ankerpunkte, und jedes Übersichtsbild kommt zu dem Ankerpunkt, der ihm in der
+Reihenfolge am nächsten liegt.
+
+Die Zeitgruppierung bleibt als zweiter Weg erhalten. Sie greift bei Fotos, die
+direkt vom Mac kommen — dort sind die EXIF-Daten noch da.
 """
 from __future__ import annotations
 
 import logging
 import os
 from datetime import datetime
+
 from pathlib import Path
 from typing import List, Optional
+
+from . import ocr
 
 log = logging.getLogger("autolister")
 
@@ -60,6 +72,81 @@ def _aufnahmezeit(pfad: Path) -> Optional[datetime]:
         return datetime.fromtimestamp(pfad.stat().st_mtime)
     except Exception:
         return None
+
+
+def nach_teilenummer(fotos: List[Path]) -> Optional[List[List[Path]]]:
+    """Fotos anhand der erkannten Teilenummern gruppieren.
+
+    **Das ist der verlässliche Weg**, seit klar ist, dass die Aufnahmezeit beim
+    Hochladen verlorengeht: iOS streift die EXIF-Daten ab (am 2026-08-07
+    nachgemessen — alle neun Fotos eines Uploads trugen nur die Downloadzeit
+    im Sekundenabstand). Die Teilenummer steht dagegen auf dem Teil selbst.
+
+    Verfahren: Jedes Foto einzeln lesen. Fotos, auf denen eine Teilenummer
+    steht, bilden die Ankerpunkte. Ein Foto ohne Nummer — die Übersichtsbilder
+    — kommt zu dem Ankerpunkt, der ihm in der Aufnahmereihenfolge am nächsten
+    liegt. Das trägt in beiden Richtungen: egal ob erst das Teil und dann das
+    Typenschild fotografiert wird oder umgekehrt.
+
+    Gibt None zurück, wenn keine oder nur eine Nummer gefunden wurde — dann
+    weiß dieses Verfahren nichts Besseres, und der Aufrufer entscheidet.
+    """
+    from . import partnumber  # spät importiert, hält das Modul leichtgewichtig
+
+    if len(fotos) <= 1:
+        return None
+    try:
+        je_foto = ocr.lies_fotos_einzeln(fotos, gruendlich=False)
+    except Exception as fehler:  # noqa: BLE001
+        log.warning("Gruppierung über Teilenummern nicht möglich: %s", fehler)
+        return None
+
+    # Je Foto die beste Teilenummer bestimmen
+    nummern: List[Optional[str]] = []
+    for texte in je_foto:
+        kandidaten = partnumber.finde_kandidaten(texte) if texte else []
+        nummern.append(kandidaten[0].nummer if kandidaten else None)
+
+    verschiedene = {n for n in nummern if n}
+    if len(verschiedene) < 2:
+        return None                      # ein Teil (oder gar keine Nummer)
+
+    # Ankerpunkte: Stellen, an denen eine neue Nummer auftaucht
+    anker = [(i, n) for i, n in enumerate(nummern) if n]
+    gruppen_von_nummer: dict = {}
+    for _, nummer in anker:
+        gruppen_von_nummer.setdefault(nummer, [])
+
+    for i, foto in enumerate(fotos):
+        if nummern[i]:
+            gruppen_von_nummer[nummern[i]].append(foto)
+            continue
+        # Nächstgelegener Ankerpunkt in der Reihenfolge
+        naechster = min(anker, key=lambda a: abs(a[0] - i))
+        gruppen_von_nummer[naechster[1]].append(foto)
+
+    # Reihenfolge der Gruppen: wie sie zuerst auftauchen
+    reihenfolge = []
+    for _, nummer in anker:
+        if nummer not in reihenfolge:
+            reihenfolge.append(nummer)
+    gruppen = [gruppen_von_nummer[n] for n in reihenfolge]
+
+    log.info("Gruppierung über Teilenummern: %d Fotos -> %d Teile (%s)",
+             len(fotos), len(gruppen), ", ".join(reihenfolge))
+    return gruppen
+
+
+def aufteilen(fotos: List[Path]) -> List[List[Path]]:
+    """Fotos eines Uploads in Teile aufteilen — bester verfügbarer Weg.
+
+    Zuerst über die Teilenummern (überlebt den Handy-Upload), danach über die
+    Aufnahmezeit (greift bei Fotos vom Mac, wo die EXIF-Daten noch da sind).
+    """
+    ueber_nummer = nach_teilenummer(fotos)
+    if ueber_nummer and len(ueber_nummer) > 1:
+        return ueber_nummer
+    return nach_aufnahmezeit(fotos)
 
 
 def nach_aufnahmezeit(fotos: List[Path],
