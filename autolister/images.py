@@ -21,7 +21,7 @@ from typing import Dict, List
 
 from PIL import Image, ImageOps
 
-from . import config
+from . import config, zuschnitt
 
 log = logging.getLogger("autolister")
 
@@ -97,20 +97,49 @@ def prepare_for_vision(photos: List[Path], work_dir: Path,
 
 
 def prepare_for_upload(photos: List[Path], work_dir: Path) -> List[Path]:
-    """Fotos für den eBay-Upload vorbereiten: volle Auflösung, aber garantiert JPEG.
+    """Fotos für den eBay-Upload vorbereiten: volle Auflösung, garantiert JPEG,
+    und auf das Teil zugeschnitten.
 
-    Bereits vorhandene JPEGs werden unverändert durchgereicht (kein
-    Qualitätsverlust durch erneutes Encodieren).
+    **Die Originale bleiben unangetastet.** Geschnitten wird ausschließlich in
+    die Kopien unter `_upload/`; in `Erledigt/` liegt weiterhin das
+    Originalfoto. Und der Zuschnitt läuft *nach* der Texterkennung — die
+    arbeitet auf den Originalen, ihr fehlt also nichts.
+
+    Ein Foto, das nicht geschnitten wurde und schon JPEG ist, wird unverändert
+    durchgereicht: kein Qualitätsverlust durch erneutes Encodieren.
     """
-    need_convert = [p for p in photos if p.suffix.lower() not in (".jpg", ".jpeg")]
-    if not need_convert:
-        return list(photos)
-    converted = _prepare(need_convert, work_dir / "_upload", 0,
-                         config.UPLOAD_JPEG_QUALITY)
-    result = []
-    for p in photos:
-        if p.suffix.lower() in (".jpg", ".jpeg"):
-            result.append(p)
-        elif p in converted:
-            result.append(converted[p])
-    return result
+    ziel = work_dir / "_upload"
+    ergebnis: List[Path] = []
+    geschnitten = 0
+
+    for foto in photos:
+        ist_jpeg = foto.suffix.lower() in (".jpg", ".jpeg")
+        try:
+            bild = open_normalized(foto)
+            neu, wurde_geschnitten = zuschnitt.zuschneiden(bild)
+        except Exception as fehler:  # noqa: BLE001
+            log.warning("%s nicht lesbar (%s) — wird übersprungen", foto.name, fehler)
+            continue
+
+        if not wurde_geschnitten and ist_jpeg:
+            ergebnis.append(foto)          # unverändert durchreichen
+            continue
+
+        ziel.mkdir(parents=True, exist_ok=True)
+        pfad = ziel / (foto.stem + ".jpg")
+        try:
+            neu.convert("RGB").save(pfad, "JPEG", quality=config.UPLOAD_JPEG_QUALITY,
+                                    optimize=True)
+            ergebnis.append(pfad)
+            geschnitten += wurde_geschnitten
+        except Exception as fehler:  # noqa: BLE001
+            log.warning("%s konnte nicht gespeichert werden (%s)", foto.name, fehler)
+            if ist_jpeg:
+                ergebnis.append(foto)
+
+    if not ergebnis:
+        raise RuntimeError("Keine der %d Bilddateien konnte gelesen werden" % len(photos))
+    if geschnitten:
+        log.info("Zuschnitt: %d von %d Foto(s) auf das Teil beschnitten",
+                 geschnitten, len(photos))
+    return ergebnis
