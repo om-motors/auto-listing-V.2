@@ -783,6 +783,12 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
         weiterhin als sichtbar und nicht gesperrt. Nur der Klick selbst weiß,
         ob er durchkommt.
         """
+        # Publish-Sperre gilt auch hier: einmal prüfen, dann erst hämmern.
+        beschriftung = _beschriftung(ziel)
+        if beschriftung and FORBIDDEN.search(beschriftung):
+            warnings.append("Foto-Editor: Klick auf '%s' blockiert "
+                            "(würde veröffentlichen!)" % beschriftung[:60])
+            return False
         ende = time.time() + sekunden
         while time.time() < ende:
             try:
@@ -821,24 +827,59 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
             page.wait_for_timeout(700)
         return False
 
+    # Der Editor wechselt nach dem Freistellen in einen Bestätigungszustand.
+    # Am 2026-08-07 live nachgemessen:
+    #
+    #   vorher:  [Pfeile] … [Hintergrund entfernen]   [Fertig]
+    #   danach:  [keine Pfeile] …                     [Abbrechen] [Speichern]
+    #
+    # **Ohne den Klick auf „Speichern" wird das Ergebnis verworfen.** Genau
+    # das passierte: Der Hintergrund war im Editor sichtbar entfernt, im
+    # Inserat aber unverändert. Und weil die Pfeile in diesem Zustand ganz
+    # verschwinden (`count() == 0`), las die alte Schleife das als „letztes
+    # Foto erreicht" und brach still ab — daher „1 von 3" bei jedem Teil.
+    speichern = editor.locator("button.btn--primary",
+                               has_text=re.compile(r"^\s*Speichern\s*$"))
+
+    def warte_auf(ziel, sekunden: int = 30) -> bool:
+        ende = time.time() + sekunden
+        while time.time() < ende:
+            try:
+                if ziel.count() and ziel.first.is_visible():
+                    return True
+            except Exception:
+                pass
+            page.wait_for_timeout(600)
+        return False
+
     bearbeitet = 0
     for i in range(anzahl):
         if not knopf.count():
             warnings.append("Hintergrund entfernen: Knopf fehlt bei Foto %d" % (i + 1))
-        elif klick_mit_geduld(knopf.first):
-            bearbeitet += 1
-            warte_bis_bereit()
+        elif not klick_mit_geduld(knopf.first):
+            warnings.append("Hintergrund entfernen: Foto %d ließ sich nicht "
+                            "freistellen" % (i + 1))
+        elif not warte_auf(speichern):
+            warnings.append("Hintergrund entfernen: bei Foto %d kam kein "
+                            "Speichern-Knopf" % (i + 1))
+        elif not klick_mit_geduld(speichern.first):
+            warnings.append("Hintergrund entfernen: Foto %d ließ sich nicht "
+                            "speichern" % (i + 1))
         else:
-            warnings.append("Hintergrund entfernen: Foto %d ließ sich in 45 s "
-                            "nicht freistellen" % (i + 1))
+            bearbeitet += 1
 
         if i + 1 >= anzahl:
             break
-        if not weiter.count() or weiter.first.is_disabled():
-            break                          # letztes Foto erreicht
+        # Erst wenn die Pfeile zurück sind, ist der Editor wieder normal.
+        # Großzügig: eBay lädt das freigestellte Bild danach neu, und das
+        # dauert länger als das Freistellen selbst.
+        if not warte_auf(weiter, sekunden=60):
+            warnings.append("Hintergrund entfernen: nach Foto %d kamen die "
+                            "Blätterpfeile nicht zurück" % (i + 1))
+            break
         if not klick_mit_geduld(weiter.first):
             warnings.append("Hintergrund entfernen: Blättern zu Foto %d "
-                            "klappte auch nach 45 s nicht" % (i + 2))
+                            "klappte nicht" % (i + 2))
             break
         _pause(page, 1200)
 
