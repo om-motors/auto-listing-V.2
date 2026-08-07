@@ -150,6 +150,29 @@ def _safe_click(page, locator, warnings: List[str], step: str) -> bool:
 # läuft bewusst seriell (siehe pipeline.py), es gibt hier keine Nebenläufigkeit.
 _LETZTE_ABWEICHUNG = ""
 
+# Zählt die am Formular hängenden Fotos. Bewusst EINE Fassung für das Warten
+# beim Upload und für die spätere Kontrolle — liefen die auseinander, wartete
+# der Upload auf ein Signal, das die Kontrolle gar nicht prüft. Genau so war
+# es bis zum 2026-08-03: der Upload wartete auf <img>-Elemente mit blob:- oder
+# ebayimg-Adresse, die es nie gibt, und lief bei JEDEM Teil in seinen
+# 90-Sekunden-Timeout. Rund 110 Sekunden verschenkt, obwohl die Fotos längst
+# oben waren — der größte Zeitfresser im ganzen Ablauf.
+#
+# eBay führt über dem Fotofeld einen eigenen Zähler ("3/25"). Der kommt von
+# eBay selbst und überlebt jeden Umbau der Vorschaudarstellung.
+ZAEHLE_FOTOS_JS = """() => {
+  const treffer = (document.body.innerText || "")
+                    .match(/\\b(\\d{1,2})\\s*\\/\\s*2[0-9]\\b/);
+  if (treffer) return parseInt(treffer[1], 10);
+  let n = 0;                       // Rückfallebene, falls der Zähler fehlt
+  for (const b of document.querySelectorAll('img')) {
+    const s = b.currentSrc || b.src || '';
+    if (s.startsWith('blob:') || s.startsWith('data:')
+        || s.includes('ebayimg')) n++;
+  }
+  return n;
+}"""
+
 
 def _step(warnings: List[str], name: str, fn, pruefen=None) -> bool:
     """Einen Formularschritt ausführen und das Ergebnis nachkontrollieren.
@@ -806,51 +829,27 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
     def upload_photos():
         file_input = page.locator("input[type='file']").first
         file_input.set_input_files([str(p) for p in photos])
-        # auf die Vorschaubilder warten statt pauschal pro Foto zu schlafen
+        # Auf eBays eigenen Zähler warten ("3/25") — dieselbe Zählung wie in
+        # der Kontrolle darunter.
+        #
+        # Vorher wartete diese Stelle darauf, dass Vorschaubilder als <img>
+        # mit blob:- oder ebayimg-Adresse erscheinen. Das tun sie nie, wie am
+        # 2026-08-02 am echten Formular gemessen. Die Wartefunktion lief damit
+        # **bei jedem Teil** in ihren 90-Sekunden-Timeout und hängte noch 20 s
+        # Netzwerkruhe an: rund 110 Sekunden verschenkt, obwohl die Fotos
+        # längst oben waren. Das war der größte Zeitfresser im ganzen Ablauf.
         try:
-            page.wait_for_function(
-                """n => {
-                  let z = 0;
-                  for (const b of document.querySelectorAll('img')) {
-                    const s = b.currentSrc || b.src || '';
-                    if (s.startsWith('blob:') || s.startsWith('data:')
-                        || s.includes('ebayimg')) z++;
-                  }
-                  return z >= n;
-                }""",
-                arg=len(photos), timeout=90000)
+            page.wait_for_function("n => (%s)() >= n" % ZAEHLE_FOTOS_JS,
+                                   arg=len(photos), timeout=60000)
         except Exception:
-            _settle(page, 20000)
+            _settle(page, 8000)
     def upload_kontrolle():
         # Die Wartefunktion oben schluckt ihren eigenen Timeout — ohne diese
         # Kontrolle galt der Upload als erledigt, auch wenn kein einziges Bild
         # ankam.
         global _LETZTE_ABWEICHUNG
         try:
-            gefunden = page.evaluate(
-                """() => {
-                  // eBay führt über dem Fotofeld einen eigenen Zähler ("3/25").
-                  // Das ist das verlässlichste Signal: er kommt von eBay selbst
-                  // und überlebt jeden Umbau der Vorschaudarstellung.
-                  //
-                  // Die frühere Zählung von <img>-Elementen ging daneben — die
-                  // Vorschaubilder stecken weder als ebayimg- noch als
-                  // blob:-Adresse in einem <img>. Der Trockenlauf vom
-                  // 2026-08-02 meldete deshalb "0 Vorschaubilder gefunden",
-                  // während im Formular sauber 3 von 25 standen.
-                  const treffer = (document.body.innerText || "")
-                                    .match(/\\b(\\d{1,2})\\s*\\/\\s*2[0-9]\\b/);
-                  if (treffer) return parseInt(treffer[1], 10);
-
-                  // Rückfallebene, falls eBay den Zähler einmal weglässt.
-                  let n = 0;
-                  for (const b of document.querySelectorAll('img')) {
-                    const s = b.currentSrc || b.src || '';
-                    if (s.startsWith('blob:') || s.startsWith('data:')
-                        || s.includes('ebayimg')) n++;
-                  }
-                  return n;
-                }""")
+            gefunden = page.evaluate(ZAEHLE_FOTOS_JS)
             if int(gefunden) >= len(photos):
                 return True
             _LETZTE_ABWEICHUNG = ("%d Vorschaubilder gefunden, %d erwartet"

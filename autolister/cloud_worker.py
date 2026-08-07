@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Dict
 
-from . import cloud, config, notify, pipeline
+from . import cloud, config, gruppieren, notify, pipeline
 
 log = logging.getLogger("autolister")
 
@@ -42,10 +42,28 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
     kennung = str(auftrag["id"])[:8]
     ordner = _arbeitsordner(auftrag)
     try:
-        fotos = cloud.fotos_holen(auftrag.get("fotos") or [], ordner)
+        speicherpfade = list(auftrag.get("fotos") or [])
+        fotos = cloud.fotos_holen(speicherpfade, ordner)
         if not fotos:
             raise RuntimeError("Der Auftrag enthält keine Fotos.")
         log.info("[%s] %d Foto(s) geladen", kennung, len(fotos))
+
+        # Enthält der Upload mehrere Teile? Dann für jedes weitere einen
+        # eigenen Auftrag anlegen und hier nur das erste bearbeiten. So kann
+        # der Nutzer einen ganzen Rundgang auf einmal hochladen.
+        wo_liegt = {str(lokal): fern for lokal, fern in zip(fotos, speicherpfade)}
+        gruppen = gruppieren.nach_aufnahmezeit(fotos)
+        if len(gruppen) > 1:
+            for weiteres_teil in gruppen[1:]:
+                pfade = [wo_liegt[str(p)] for p in weiteres_teil if str(p) in wo_liegt]
+                if pfade:
+                    # Eine getippte Teilenummer gilt nur für EIN Teil — sie
+                    # den übrigen mitzugeben wäre schlicht falsch.
+                    cloud.auftrag_anlegen(pfade, bezeichnung=None)
+            log.info("[%s] %d Teile erkannt — %d weitere(r) Auftrag angelegt",
+                     kennung, len(gruppen), len(gruppen) - 1)
+            fotos = gruppen[0]
+            speicherpfade = [wo_liegt[str(p)] for p in fotos if str(p) in wo_liegt]
 
         # Eine vom Handy eingetippte Teilenummer wird wie ein Ordnername
         # behandelt — `partnumber.aus_vorgabe()` erkennt selbst, ob das
@@ -85,7 +103,9 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False) -> None:
         if dry_run:
             log.info("[%s] Trockenlauf — Fotos bleiben im Speicher", kennung)
         else:
-            cloud.fotos_loeschen(auftrag.get("fotos") or [])
+            # Nur die Fotos DIESES Teils. Bei einem Upload mit mehreren Teilen
+            # warten die übrigen noch in ihren eigenen Aufträgen.
+            cloud.fotos_loeschen(speicherpfade)
 
     except BaseException as fehler:  # noqa: BLE001 — ein Auftrag darf nie den Dienst kippen
         log.exception("[%s] fehlgeschlagen", kennung)

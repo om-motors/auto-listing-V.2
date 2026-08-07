@@ -102,6 +102,21 @@ def naechster_auftrag() -> Optional[Dict]:
     return auftrag
 
 
+def auftrag_anlegen(fotos: List[str], bezeichnung: Optional[str] = None) -> None:
+    """Einen weiteren Auftrag in die Warteschlange stellen.
+
+    Gebraucht, wenn ein Upload mehrere Teile enthält: Für jedes weitere Teil
+    entsteht ein eigener Auftrag. So bekommt jedes Teil auf dem Handy seine
+    eigene Zeile mit Status, Preis und Entwurfslink — statt dass drei Teile
+    hinter einem einzigen Eintrag verschwinden.
+    """
+    _anfrage("/rest/v1/auftraege", methode="POST",
+             daten=json.dumps({"fotos": fotos,
+                               "bezeichnung": bezeichnung}).encode("utf-8"),
+             kopfzeilen={"Content-Type": "application/json",
+                         "Prefer": "return=minimal"})
+
+
 def haengende_freigeben() -> int:
     """Steckengebliebene Aufträge zurück auf `neu` setzen. Nur beim Start!
 
