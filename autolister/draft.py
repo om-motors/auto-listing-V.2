@@ -513,6 +513,39 @@ def _formular_bereit(page, warnings: List[str]) -> bool:
     return True
 
 
+def _merkmal_gleich(name: str, label: str) -> bool:
+    """Meint dieser Feldname genau dieses Merkmal?
+
+    Klammerzusätze zählen nicht mit: Das Feld heißt real
+    „OE/OEM Referenznummer(n)", gesucht wird „OE/OEM Referenznummer".
+
+    Ein reiner **Präfixvergleich wäre falsch** — er lässt „Hersteller" das
+    Feld „Herstellernummer" greifen. Genau das ist am 2026-08-09 passiert: In
+    der Kategorie „ECUs & Steuergeräte" gibt es überhaupt kein Merkmal
+    „Hersteller". Also wurde „Audi" in die Herstellernummer geschrieben und
+    die Teilenummer gleich hinterher — das Feld zeigte am Ende „Audi (+1)",
+    und die echte Herstellernummer fehlte im Angebot.
+    """
+    def ohne_klammern(text: str) -> str:
+        return re.sub(r"\(.*?\)", "", text or "").strip().lower()
+    return bool(name) and ohne_klammern(name) == ohne_klammern(label)
+
+
+def _merkmal_aria(page) -> List[str]:
+    """Die `aria-label` **aller** Aufklapp-Knöpfe, in Dokumentreihenfolge.
+
+    Auch die leeren — sonst stimmen die Positionen nicht mehr. Gefüllte
+    Merkmale und die Abschnittsknöpfe (Fotos, Titel, Preis, Lieferung) tragen
+    keines und erscheinen hier als leerer Eintrag.
+    """
+    try:
+        return page.evaluate("""() => [...document.querySelectorAll(
+            'button.se-expand-button__button')]
+            .map(f => (f.getAttribute('aria-label') || '').trim());""") or []
+    except Exception:
+        return []
+
+
 def _merkmal_knopf(page, label: str):
     """Den sichtbaren Aufklapp-Knopf einer Artikelmerkmal-Zeile finden.
 
@@ -529,21 +562,20 @@ def _merkmal_knopf(page, label: str):
     dass es bis zum Öffnen `display:none` hat — Playwright meldete stur
     "element is not visible".
     """
-    # Präfix-Vergleich statt exakt: das Feld heißt "OE/OEM Referenznummer(n)",
-    # ein exakter Vergleich auf "OE/OEM Referenznummer" ging daneben.
-    knopf = page.locator(
-        "button.se-expand-button__button[aria-label^='%s']" % label).first
-    if knopf.count():
-        return knopf
+    # Über die Position, verglichen mit `_merkmal_gleich` — also exakt, nur
+    # Klammerzusätze verziehen. Ein `[aria-label^='...']` stand hier bis zum
+    # 2026-08-09 und war der Grund, warum „Hersteller" das Feld
+    # „Herstellernummer" traf.
+    stelle = _merkmal_position(page, label)
+    if stelle >= 0:
+        return page.locator("button.se-expand-button__button").nth(stelle)
     # Ist bereits ein Wert gesetzt, entfernt eBay das aria-label. Dann bleibt
     # nur der Weg über die Beschriftung links daneben. Die ist ein
     # `button.fake-link.tooltip__host` und behält ihren Text — am echten
-    # Formular verifiziert (2026-08-01). Die frühere Suche ging über
-    # `div.summary__attributes--label`; ein solches Element gibt es dort gar
-    # nicht, die Rückfallebene lief also ins Leere.
+    # Formular verifiziert (2026-08-01). Auch hier exakt vergleichen.
     knopf = page.locator(
         "xpath=//button[contains(@class,'tooltip__host')]"
-        "[starts-with(normalize-space(.),'%s')]/following::button"
+        "[normalize-space(.)='%s']/following::button"
         "[contains(@class,'se-expand-button__button')][1]" % label).first
     return knopf if knopf.count() else None
 
@@ -563,6 +595,10 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
     knopf = _merkmal_knopf(page, label)
     if knopf is None:
         raise RuntimeError("Aufklapp-Knopf nicht gefunden")
+    # Die Stelle merken, SOLANGE das Feld noch leer ist und seinen Namen
+    # trägt. Nach dem Füllen entfernt eBay das aria-label, und dann ist das
+    # Feld über den Namen nicht mehr auffindbar — siehe _merkmal_wert().
+    position = _merkmal_position(page, label)
     knopf.scroll_into_view_if_needed(timeout=8000)
     _dialoge_schliessen(page)
     knopf.click(timeout=8000)
@@ -581,8 +617,24 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
     try:
         feld.wait_for(state="visible", timeout=8000)
     except Exception:
-        feld = page.locator("input.textbox__control:visible").first
-        feld.wait_for(state="visible", timeout=6000)
+        # **Niemals auf ein globales `input.textbox__control:visible` ausweichen.**
+        # Nach einem gesetzten Merkmal ist das oft noch dessen Feld: Am
+        # 2026-08-09 landete die Herstellernummer dadurch im Feld „Hersteller",
+        # das danach „Audi (+1)" zeigte — zwei Werte in einem Feld, und das
+        # eigentliche Feld blieb leer. Stattdessen die eigene Zeile neu suchen
+        # und noch einmal öffnen; klappt auch das nicht, soll der Schritt
+        # ehrlich scheitern.
+        page.keyboard.press("Escape")
+        _pause(page, 800)
+        knopf = _merkmal_knopf(page, label)
+        if knopf is None:
+            raise RuntimeError("Aufklapp-Knopf nach dem Neuaufbau nicht mehr da")
+        knopf.scroll_into_view_if_needed(timeout=6000)
+        knopf.click(timeout=8000)
+        _pause(page, 1500)
+        zeile = knopf.locator("xpath=..")
+        feld = zeile.locator("input.textbox__control").first
+        feld.wait_for(state="visible", timeout=8000)
     feld.click(timeout=6000)
     feld.press_sequentially(str(wert), delay=110)
     _pause(page, 1800)
@@ -609,6 +661,11 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
                 return text
         except Exception:
             pass
+        # Über die gemerkte Stelle — der einzige Weg, der auch bei einem
+        # gefüllten Feld noch trägt.
+        text = _merkmal_wert(page, label, position)
+        if text:
+            return text
         # Knopf neu suchen — nach dem Neuaufbau ist der alte Zeiger tot
         neu = _merkmal_knopf(page, label)
         if neu is not None:
@@ -632,38 +689,89 @@ def _merkmal_setzen(page, label: str, wert: str) -> str:
     return ""
 
 
-def _merkmal_wert(page, label: str) -> str:
-    """Gesetzten Wert eines Merkmals ablesen — über die Position in der Liste.
+def _merkmal_position(page, label: str) -> int:
+    """An welcher Stelle steht das Wertfeld dieses Merkmals? (-1 = nicht da)
 
-    Am echten Formular nachgemessen (2026-08-02): **Sobald ein Merkmal einen
-    Wert trägt, entfernt eBay dessen `aria-label`.** Die gefüllten Felder
-    zeigten `aria=''` mit Text „Audi", „Sonnenblende", „8K0857552"; nur die
-    leeren trugen noch ihren Namen. Jeder Selektor, der am `aria-label` hängt,
-    findet ein gefülltes Merkmal also nicht mehr — genau daran scheiterte das
-    Zurücklesen von „Hersteller".
-
-    Beschriftungen (`button.tooltip__host`) und Wertfelder
-    (`button.se-expand-button__button`) stehen aber in **derselben
-    Reihenfolge**. Über den Index gefunden, trägt es in beiden Zuständen.
+    Gezählt wird über **alle** `button.se-expand-button__button` der Seite, in
+    Dokumentreihenfolge. Gesucht wird über das `aria-label` — das trägt ein
+    Merkmal, **solange es leer ist**.
 
     Exakter Vergleich zuerst: „Hersteller" darf nicht „Herstellernummer"
     greifen. Erst danach der Präfixvergleich — das Feld heißt real
     „OE/OEM Referenznummer(n)".
     """
+    for i, name in enumerate(_merkmal_aria(page)):
+        if _merkmal_gleich(name, label):
+            return i
+    return -1
+
+
+def _merkmal_wert(page, label: str, position: int = -1) -> str:
+    """Gesetzten Wert eines Merkmals ablesen.
+
+    **Sobald ein Merkmal einen Wert trägt, entfernt eBay dessen `aria-label`**
+    (am echten Formular nachgemessen, 2026-08-02). Ein gefülltes Merkmal ist
+    über seinen Namen also grundsätzlich nicht mehr auffindbar — beim Setzen
+    greift der Selektor noch, beim Kontrollieren nie.
+
+    Bis zum 2026-08-09 wurde deshalb über die Position gepaart: Beschriftungen
+    (`button.tooltip__host`) und Wertfelder standen in derselben Reihenfolge.
+    **Diese Annahme trägt nicht mehr.** eBay hat auch den Abschnitten Fotos,
+    Titel, Preis und Lieferung Aufklapp-Knöpfe gegeben; gemessen wurden
+    5 Beschriftungen gegen 16 Wertfelder, und die Kontrolle las für
+    „Hersteller" prompt „Foto-Optionen ansehen".
+
+    Ebenso wenig taugt das Eingabefeld `search-box-attributes…`: Es ist das
+    Suchfeld der Auswahlliste und steht auch nach dem Setzen leer (geprüft am
+    2026-08-09 mit gesetztem „Audi").
+
+    Verlässlich ist allein die **Stelle in der Liste**, gemerkt zu dem
+    Zeitpunkt, an dem das Feld noch leer war und seinen Namen trug. Deshalb
+    reicht `_merkmal_setzen()` sie hier durch. Ohne sie bleibt nur der Versuch
+    über das `aria-label` — der greift nur bei leeren Feldern.
+    """
+    if position is None or position < 0:
+        position = _merkmal_position(page, label)
+    if position < 0:
+        return ""
     try:
-        return page.evaluate("""(gesucht) => {
-          const norm = (s) => (s || '').trim().toLowerCase();
-          const ziel = norm(gesucht);
-          const labels = [...document.querySelectorAll('button.tooltip__host')];
+        return page.evaluate("""(i) => {
           const felder = [...document.querySelectorAll(
                             'button.se-expand-button__button')];
-          let i = labels.findIndex(l => norm(l.innerText) === ziel);
-          if (i < 0) i = labels.findIndex(l => norm(l.innerText).startsWith(ziel));
-          if (i < 0 || i >= felder.length) return '';
-          return (felder[i].innerText || '').trim();
-        }""", label) or ""
+          return felder[i] ? (felder[i].innerText || '').trim() : '';
+        }""", position) or ""
     except Exception:
         return ""
+
+
+def _merkmal_namen(page) -> List[str]:
+    """Welche Artikelmerkmale bietet die gewählte Kategorie überhaupt an?
+
+    Gelesen werden die `aria-label` der noch leeren Wertfelder. Nötig, um
+    „gibt es hier nicht" von „nicht gefunden" zu unterscheiden: In der
+    Kategorie „Sonstige" existiert kein Merkmal **Produktart**, und der
+    Bericht verlangte dafür Handarbeit, die im Formular gar nicht möglich ist.
+    """
+    return [name for name in _merkmal_aria(page) if name]
+
+
+def _merkmale_ausklappen(page, warnings: List[str]) -> None:
+    """„Mehr anzeigen" bei den Artikelmerkmalen klicken.
+
+    eBay zeigt seit dem 2026-08-09 nur die Pflichtmerkmale und versteckt den
+    Rest hinter „Mehr anzeigen" — darunter **„OE/OEM Referenznummer(n)"**, das
+    Feld, über das Käufer Kfz-Teile suchen. Ohne diesen Klick meldete der
+    Schritt „Aufklapp-Knopf nicht gefunden", und das Feld blieb leer.
+    """
+    knopf = page.get_by_role(
+        "button", name=re.compile(r"^\s*Mehr anzeigen\s*$", re.I)).first
+    try:
+        if not knopf.count() or not knopf.is_visible():
+            return
+    except Exception:
+        return
+    if _safe_click(page, knopf, warnings, "Merkmale ausklappen"):
+        _pause(page, 2000)
 
 
 def _settle(page, timeout: int = 8000) -> None:
@@ -889,6 +997,28 @@ def _warnung_einmal(warnings: List[str], text: str) -> None:
 # 7000 Als Ersatzteil/defekt. Für dieses Projekt ist es immer "Gebraucht" —
 # so steht es in CLAUDE.md unter den fachlichen Vorgaben.
 ZUSTAND_GEBRAUCHT = "3000"
+
+# So heißt der Schalter im Abschnitt „Angebot bewerben" seit dem 2026-08-09.
+# Es gibt zwei Modelle: „Basis" kostet pro Verkauf, „Premium" pro Klick. Für
+# dieses Projekt gilt Basis — der Nutzer zahlt nur, wenn etwas verkauft wird.
+ANZEIGE_BASIS = "Basis auswählen"
+
+
+def _ruecknahme_text(page) -> str:
+    """Was die Rücknahme-Zusammenfassung sagt — klein geschrieben.
+
+    Seit dem 2026-08-09 gibt es weder die Karte „Details zur Lieferung" noch
+    den Rücknahme-Dialog. eBay merkt sich die Einstellung am Konto und zeigt
+    sie nur noch an: `div.returns-field-display__container`, zweimal —
+    einmal Inland, einmal Ausland.
+    """
+    stuecke = []
+    for el in page.locator("div.returns-field-display__container").all():
+        try:
+            stuecke.append(" ".join((el.inner_text(timeout=3000) or "").split()))
+        except Exception:  # noqa: BLE001 — ein unlesbarer Block darf nicht alles kippen
+            continue
+    return " ".join(stuecke).lower()
 
 
 def _zustand_vorab_waehlen(page, warnings: List[str]) -> bool:
@@ -1344,12 +1474,28 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         # config.MERKMALE_AUSLASSEN (Vorgabe des Nutzers). Im Titel bleibt die
         # Position erhalten, nur als Artikelmerkmal wird sie nicht gesetzt.
     }
+    # Erst aufklappen: „OE/OEM Referenznummer(n)" liegt seit dem 2026-08-09
+    # hinter „Mehr anzeigen" und war vorher schlicht nicht da.
+    _merkmale_ausklappen(page, warnings)
+
+    # Was diese Kategorie überhaupt anbietet. Ein Merkmal, das es hier nicht
+    # gibt, ist keine offene Aufgabe für den Nutzer — er könnte sie gar nicht
+    # erledigen. Es gehört als Meldung in den Bericht, nicht in die Hakenliste.
+    vorhanden = _merkmal_namen(page)
+
     gesetzte_werte: Dict[str, str] = {}
+    stellen: Dict[str, int] = {}   # wo das Feld stand, als es noch leer war
     for label, value in merkmale.items():
         if not value or label in config.MERKMALE_AUSLASSEN:
             continue
+        if vorhanden and not any(_merkmal_gleich(n, label) for n in vorhanden):
+            warnings.append("Kategorie kennt kein Merkmal '%s' — übersprungen "
+                            "(vorhanden: %s)"
+                            % (label, ", ".join(_merkmal_namen(page))[:150]))
+            continue
 
         def set_specific(label=label, value=value):
+            stellen[label] = _merkmal_position(page, label)
             gesetzte_werte[label] = _merkmal_setzen(page, label, value)
 
         def kontrolle(label=label, value=value):
@@ -1361,7 +1507,7 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
                 return True
             gelesen = ""
             for versuch in range(3):
-                gelesen = _merkmal_wert(page, label)
+                gelesen = _merkmal_wert(page, label, stellen.get(label, -1))
                 if _gleich(gelesen, value):
                     return True
                 if versuch < 2:
@@ -1425,33 +1571,30 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
 
     # --- Angebot bewerben: eigener Anzeigentarif 2 % ---
     def promote_2_percent():
-        # Reihenfolge ist zwingend: erst den Schalter einschalten, sonst gibt
-        # es weder die Schnellauswahl (8/10/12 %) noch den Knopf für den
-        # eigenen Tarif — der ganze Block wird erst beim Einschalten gebaut.
+        # **Umbau vom 2026-08-09.** Den Block `div.promoted-listing-simple`
+        # mit der Schnellauswahl 8/10/12 % und dem Knopf „Eigenen
+        # Anzeigentarif auswählen" gibt es nicht mehr. Stattdessen stehen dort
+        # zwei Schalter: „Basis auswählen" (Kosten pro Verkauf) und „Premium
+        # auswählen" (Kosten pro Klick).
+        #
+        # Reihenfolge bleibt zwingend: Erst wenn „Basis" an ist, existiert das
+        # Tarif-Feld `adRate` — eBay legt es mit **11 %** an. Wer es nicht
+        # überschreibt, zahlt das Fünfeinhalbfache der Vorgabe.
         schalter = page.locator(
-            "div.promoted-listing-simple input[role='switch']").first
+            "input[role='switch'][name='%s']" % ANZEIGE_BASIS).first
         if not schalter.count():
-            raise RuntimeError("Schalter 'Angebot bewerben' nicht gefunden")
+            raise RuntimeError("Schalter '%s' nicht gefunden" % ANZEIGE_BASIS)
         schalter.scroll_into_view_if_needed(timeout=8000)
         if not schalter.is_checked():
-            schalter.click(timeout=8000)
+            # Das echte input liegt unter einer gestalteten Hülle — ohne
+            # `force` scheitert der Klick an der Sichtbarkeitsprüfung.
+            schalter.check(force=True, timeout=8000)
             _pause(page, 2500)
 
-        # Die Schnellauswahl kennt nur 8/10/12 %. Für 2 % braucht es das
-        # Freitextfeld hinter "Eigenen Anzeigentarif auswählen".
-        eigen = page.locator("button.custom-rate-button-switch").first
-        if not eigen.count():
-            eigen = page.get_by_role(
-                "button", name=re.compile("Eigenen Anzeigentarif", re.I)).first
-        eigen.scroll_into_view_if_needed(timeout=8000)
-        eigen.click(timeout=8000)
-        _pause(page, 1800)
-
-        feld = page.locator(
-            "input[aria-label*='Anzeigentarif' i], input[aria-label*='Prozent' i]").last
+        feld = page.locator("input[name='adRate']").first
         if not feld.count():
-            feld = page.locator(
-                "div.promoted-listing-simple input[type='text']").last
+            raise RuntimeError("Tarif-Feld 'adRate' nicht gefunden")
+        feld.scroll_into_view_if_needed(timeout=8000)
         feld.click(timeout=6000)
         feld.fill("")
         feld.press_sequentially(config.ANZEIGENTARIF_PROZENT, delay=120)
@@ -1459,171 +1602,112 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         _pause(page, 1500)
 
     def bewerben_kontrolle():
-        # Beides zusammen: der Schalter muss an sein UND der eigene Tarif
-        # eingetragen. Die frühere Rückfallebene prüfte, ob "2 %" irgendwo im
-        # Abschnittstext steht — "2 %" steht aber in "12 %", das die
-        # Schnellauswahl ohnehin anzeigt. Sie meldete damit praktisch immer
-        # Erfolg, auch bei eBays voreingestellten 10 %.
-        return _felder_stimmen(
-            page,
-            promotedListingSelection="true",
-            customAdRateField=config.ANZEIGENTARIF_PROZENT)
+        # Beides zusammen: Der Schalter muss an sein UND der Tarif stimmen.
+        # Ein Textvergleich taugt hier nicht — „2 %" steht auch in „12 %",
+        # und genau daran meldete die alte Kontrolle fast immer Erfolg.
+        werte = _formularwerte(page)
+        global _LETZTE_ABWEICHUNG
+        if (werte.get("adRate") == config.ANZEIGENTARIF_PROZENT
+                and werte.get(ANZEIGE_BASIS) == "true"):
+            return True
+        _LETZTE_ABWEICHUNG = ("Schalter=%r, Tarif=%r (erwartet 'true' / %r)"
+                              % (werte.get(ANZEIGE_BASIS), werte.get("adRate"),
+                                 config.ANZEIGENTARIF_PROZENT))
+        return False
     _step(warnings, "Angebot bewerben (%s%%)" % config.ANZEIGENTARIF_PROZENT,
           promote_2_percent, bewerben_kontrolle)
 
-    # --- Rücknahme im Inland aktivieren (Formular startet mit 'Keine Rücknahme') ---
+    # --- Rücknahme prüfen (eBay merkt sie sich am Konto) ---
     def enable_returns():
-        # "Details zur Lieferung" ist eine anklickbare Karte, kein
-        # Bearbeiten-Knopf: button.se-field-card__body mit dem Text
-        # "Standort: ... Keine Rücknahme". Ein Klick öffnet den Dialog, in dem
-        # die Rücknahme-Einstellungen liegen.
-        karte = page.locator("button.se-field-card__body", has_text="Standort").first
-        if not karte.count():
-            karte = page.locator("button.se-field-card__body",
-                                 has_text=re.compile("Rücknahme")).first
-        if not karte.count():
-            raise RuntimeError("Karte 'Details zur Lieferung' nicht gefunden")
-        karte.scroll_into_view_if_needed(timeout=8000)
-        _dialoge_schliessen(page)
-        karte.click(timeout=8000)
-        _pause(page, 3000)
+        """Hier wird bewusst NICHT mehr geklickt — nur kontrolliert.
 
-        # 1) Inlandsrücknahme einschalten (Schalter mit Label im Dialog)
-        beschriftung = page.locator(
-            "label.field__label", has_text=re.compile(r"Rücknahme im Inland")).first
-        if not beschriftung.count():
-            beschriftung = page.get_by_text(
-                re.compile(r"Rücknahme im Inland", re.I)).first
-        beschriftung.scroll_into_view_if_needed(timeout=6000)
-        beschriftung.click(timeout=8000)
-        _pause(page, 2000)
+        Bis zum 2026-08-09 führte der Weg über die Karte „Details zur
+        Lieferung" in einen Dialog mit Schalter, Frist und Rückversandzahler.
+        Beides gibt es nicht mehr: `button.se-field-card__body` liefert null
+        Treffer, und `returnPolicy`/`returnDuration`/`returnShippingPayer`
+        stehen nicht mehr im Formular.
 
-        def waehle(beschreibung: str, muster, feldname: str, sollwert: str) -> None:
-            """Eine Option im Rücknahme-Dialog setzen — und sagen, wenn es nicht ging.
+        eBay merkt sich die Rücknahme stattdessen am Verkäuferkonto. Am frisch
+        angelegten Entwurf stand dort bereits genau die Vorgabe des Nutzers:
+        „Akzeptiert innerhalb von 14 Tage / Käufer zahlt den Rückversand" und
+        „Keine internationale Rücknahme".
 
-            Vorher hingen Frist und Rückversandzahler je an
-            `if count() and is_visible()` ohne else-Zweig: passte der Textanker
-            nicht mehr, wurden sie **still** übersprungen, und die Kontrolle
-            merkte nichts. Ein Entwurf mit eBays Voreinstellung (30 Tage,
-            Verkäufer zahlt) galt damit als erledigt.
-            """
-            if _formularwerte(page).get(feldname) == sollwert:
-                return  # steht schon richtig
-            treffer = page.get_by_text(muster).first
-            try:
-                if treffer.count() and treffer.is_visible():
-                    treffer.click(timeout=5000)
-                    _pause(page, 700)
-                    if _formularwerte(page).get(feldname) == sollwert:
-                        return
-            except Exception:
-                pass
-            liste = page.locator("select[name='%s']" % feldname).first
-            try:
-                if liste.count():
-                    liste.select_option(sollwert, timeout=5000)
-                    _pause(page, 700)
-                    return
-            except Exception:
-                pass
-            warnings.append("Rücknahme: %s nicht gesetzt — eBays Voreinstellung "
-                            "bleibt stehen" % beschreibung)
-
-        # 2) Frist auf 14 Tage (Vorgabe des Nutzers)
-        waehle("Frist %d Tage" % config.RUECKNAHME_TAGE,
-               re.compile(r"^\s*%d Tage\s*$" % config.RUECKNAHME_TAGE),
-               "returnDuration", "Days_%d" % config.RUECKNAHME_TAGE)
-
-        # 3) Rückversand zahlt der Käufer
-        if config.RUECKVERSAND_ZAHLT_KAEUFER:
-            waehle("'Käufer zahlt Rückversand'",
-                   re.compile(r"Käufer (zahlt|trägt).*(Rückversand|Rücksendung)", re.I),
-                   "returnShippingPayer", "Buyer")
-
-        fertig = page.locator("button.btn--primary", has_text=re.compile(
-            r"^\s*(Fertig|Übernehmen|Speichern|OK)\s*$", re.I)).first
-        if not fertig.count():
-            fertig = page.get_by_role(
-                "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
-        if fertig.count() and fertig.is_visible():
-            _safe_click(page, fertig, warnings, "Rücknahme übernehmen")
-            _pause(page, 2500)
+        Einen Editor anzusteuern, den niemand ausgemessen hat, wäre geraten —
+        und die Rücknahme ist rechtlich bindend. Deshalb: prüfen und, wenn es
+        nicht stimmt, den Nutzer mit dem tatsächlichen Wortlaut darauf stoßen.
+        """
+        return
 
     def ruecknahme_kontrolle():
-        # Alle drei Vorgaben prüfen, nicht nur eine. Vorher stand hier
-        # `"Keine Rücknahme" not in text` — ein Entwurf mit eBays
-        # Voreinstellung (30 Tage, Verkäufer zahlt) bestand das mühelos, und
-        # der Nutzer hätte ab dann jede Rücksendung selbst bezahlt.
-        return _felder_stimmen(
-            page,
-            returnPolicy="true",
-            returnDuration="Days_%d" % config.RUECKNAHME_TAGE,
-            returnShippingPayer="Buyer" if config.RUECKVERSAND_ZAHLT_KAEUFER else "Seller")
-    _step(warnings, "Rücknahme aktivieren", enable_returns, ruecknahme_kontrolle)
+        global _LETZTE_ABWEICHUNG
+        text = _ruecknahme_text(page)
+        if not text:
+            _LETZTE_ABWEICHUNG = "keine Rücknahme-Anzeige im Formular gefunden"
+            return False
+        fehlt = []
+        if "%d tage" % config.RUECKNAHME_TAGE not in text:
+            fehlt.append("%d Tage" % config.RUECKNAHME_TAGE)
+        if config.RUECKVERSAND_ZAHLT_KAEUFER and "käufer zahlt" not in text:
+            fehlt.append("Käufer zahlt Rückversand")
+        if "keine internationale rücknahme" not in text:
+            fehlt.append("keine internationale Rücknahme")
+        if not fehlt:
+            return True
+        _LETZTE_ABWEICHUNG = "es fehlt: %s — im Entwurf steht: %s" % (
+            ", ".join(fehlt), text[:120])
+        return False
+    _step(warnings, "Rücknahme", enable_returns, ruecknahme_kontrolle)
 
-    # --- Keine internationale Rücknahme / kein Auslandsversand ---
-    # Vorgabe des Nutzers, die es im Code bisher überhaupt nicht gab: ein
-    # `grep` nach "international" lieferte null Treffer. Dass der Schalter im
-    # ersten Echtlauf aus war, ist eBays Voreinstellung — aus einer früheren
-    # Vorlage kann er aktiv sein, und niemand hätte es bemerkt.
+    # --- Kein internationaler Versand ---
+    # Vorgabe des Nutzers. Der Schalter hieß bis zum 2026-08-09
+    # `isInternationalShippingOn`; jetzt heißt er `intlShippingServicePref`
+    # und sitzt im Abschnitt „Details zur Lieferung". Unter dem alten Namen
+    # war er schlicht nicht auffindbar, und der Schritt meldete Handarbeit.
     def kein_auslandsversand():
-        if _formularwerte(page).get("isInternationalShippingOn") == "false":
-            return
-        schalter = page.locator("input[name='isInternationalShippingOn']").first
+        schalter = page.locator(
+            "input[role='switch'][name='intlShippingServicePref']").first
         if not schalter.count():
             raise RuntimeError("Schalter 'Internationaler Versand' nicht gefunden")
+        if not schalter.is_checked():
+            return  # steht schon aus
         schalter.scroll_into_view_if_needed(timeout=8000)
-        _dialoge_schliessen(page)
-        schalter.click(timeout=8000)
+        schalter.uncheck(force=True, timeout=8000)
         _pause(page, 1500)
     _step(warnings, "Kein internationaler Versand", kein_auslandsversand,
-          lambda: _felder_stimmen(page, isInternationalShippingOn="false"))
+          lambda: _felder_stimmen(page, intlShippingServicePref="false"))
 
     # --- Versandkosten (DHL-Stufe) ---
     def set_shipping():
-        # eBay bietet Versanddienste als Kacheln mit festen Preisen an. Für
-        # einen eigenen Betrag (60 € Spedition) führt der Weg über
-        # "Versandkosten bearbeiten" unter "Wer zahlt?".
-        # Bewusst ohne Default: fehlt der Wert, soll das als Warnung auffallen,
-        # statt stillschweigend 0,00 € einzutragen — die Kontrolle unten hätte
-        # dann gegen denselben falschen Wert geprüft und ihn bestätigt.
+        # **Umbau vom 2026-08-09.** Der Umweg über „Versandkosten bearbeiten"
+        # und einen Dialog ist weg; der Betrag steht direkt im Formular:
+        # `input[name='domesticShippingPrice1']`.
+        #
+        # Wichtig: Das Feld ist am frisch angelegten Entwurf **vorbelegt** —
+        # mit dem Versandpreis des zuletzt eingestellten Artikels (gemessen:
+        # 23,99 €). Wer es nicht überschreibt, verkauft zum falschen
+        # Versandpreis, und niemand sieht es dem Entwurf an.
+        #
+        # Bewusst ohne Default beim Lesen des Preises: fehlt der Wert, soll
+        # das als Warnung auffallen, statt stillschweigend 0,00 € einzutragen.
         preis = _betrag(listing["versandpreis"])
-        knopf = page.get_by_role(
-            "button", name=re.compile("Versandkosten bearbeiten", re.I)).first
-        if not knopf.count():
-            knopf = page.get_by_text(
-                re.compile("Versandkosten bearbeiten", re.I)).first
-        if not knopf.count():
-            raise RuntimeError("'Versandkosten bearbeiten' nicht gefunden")
-        knopf.scroll_into_view_if_needed(timeout=8000)
+        feld = page.locator("input[name='domesticShippingPrice1']").first
+        if not feld.count():
+            raise RuntimeError("Versandkostenfeld 'domesticShippingPrice1' "
+                               "nicht gefunden")
+        feld.scroll_into_view_if_needed(timeout=8000)
         _dialoge_schliessen(page)
-        knopf.click(timeout=8000)
-        _pause(page, 3000)
-
-        # Im Dialog das erste sichtbare Betragsfeld füllen
-        feld = page.locator(
-            "input[aria-label*='Versandkosten' i], input[aria-label*='Kosten' i], "
-            "input[aria-label*='Betrag' i]").first
-        if not feld.count():
-            feld = page.locator("[role='dialog'] input[type='text']").first
-        if not feld.count():
-            raise RuntimeError("Betragsfeld im Versanddialog nicht gefunden")
         feld.click(timeout=6000)
         feld.fill("")
         feld.press_sequentially(preis, delay=110)
-        _pause(page, 1000)
-
-        fertig = page.locator("button.btn--primary", has_text=re.compile(
-            r"^\s*(Fertig|Übernehmen|Speichern|OK)\s*$", re.I)).first
-        if not fertig.count():
-            fertig = page.get_by_role(
-                "button", name=re.compile(r"^(Fertig|Übernehmen|Speichern|OK)$", re.I)).first
-        if fertig.count() and fertig.is_visible():
-            _safe_click(page, fertig, warnings, "Versanddialog schließen")
-            _pause(page, 2500)
+        page.keyboard.press("Tab")
+        _pause(page, 1800)
 
     def versand_kontrolle():
-        return _betrag(listing["versandpreis"]) in _abschnitt_text(page, r"Wer zahlt")
+        # Gegen das Feld selbst prüfen, nicht gegen den Abschnittstext. Die
+        # frühere Kontrolle suchte den Betrag im Text unter „Wer zahlt" — der
+        # stand dort auch dann, wenn er aus einem fremden Angebot stammte.
+        return _felder_stimmen(
+            page, domesticShippingPrice1=_betrag(listing["versandpreis"]))
     if not _step(warnings, "Versandkosten", set_shipping, versand_kontrolle):
         warnings.append("Versandstufe '%s' (%.2f €) bitte im Entwurf von Hand setzen."
                         % (listing.get("versandstufe"), listing.get("versandpreis", 0)))
