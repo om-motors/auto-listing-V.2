@@ -3,138 +3,361 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#111418">
-<title>Auto-Listing — Fotos hochladen</title>
+<meta name="theme-color" content="#2c2c2c">
+<title>OM Motors — Auto-Listing</title>
 <style>
-  :root {
-    --bg: #f6f7f9; --karte: #fff; --text: #14181d; --leise: #667085;
-    --rand: #dfe3e8; --akzent: #1f6feb; --akzent-text: #fff;
-    --ok: #0f7b3d; --warn: #a15c00; --fehler: #b42318;
+/* ============================================ Hausfarben OM Motors
+
+   Übernommen aus TeilePilot (om-motors/autoteilewawi, Code/styles.css),
+   damit beide Anwendungen wie ein Haus aussehen — Auto-Listing soll später
+   in TeilePilot aufgehen.
+
+   Das Logo ist einfarbig: weiße Marke auf warmem Anthrazit. Der Unterschied
+   zwischen „Knopf" und „Fläche" entsteht deshalb über HELLIGKEIT, nicht über
+   Buntheit. Die Grautöne sind bewusst warm; neutrales Grau wirkt neben dem
+   Anthrazit blaustichig, und Blau will der Nutzer ausdrücklich nicht mehr
+   sehen. Diese Seite lief bis zum 2026-08-09 genau darauf (#1f6feb).
+
+   Bernstein und Rot bleiben Signale („prüfen", „fehlgeschlagen"), keine
+   Markenfarben — deshalb dürfen sie sich abheben.                        */
+:root {
+  color-scheme: light;
+  --om-dark: #2c2c2c;
+  --om-dark-2: #232323;
+  --bg: #f4f3f1;
+  --panel: #ffffff;
+  --ink: #1c1b19;
+  /* Gemessen statt geschätzt: #74716c erreicht auf der hellen Fläche nur
+     4,4:1 und bleibt damit unter der Lesbarkeitsgrenze von 4,5:1. */
+  --muted: #63605a;
+  --line: #e3e0db;
+  --brand: #2c2c2c;
+  --brand-strong: #171716;
+  /* Schrift AUF der Hausfarbe. Eigene Variable, weil sie im dunklen Modus
+     kippt: dort ist der Knopf hell und die Schrift dunkel. */
+  --on-brand: #ffffff;
+  --amber: #b45309;
+  --green: #2f7d4f;
+  --red: #b42318;
+  --on-red: #ffffff;
+  --soft: #eeebe6;
+  --shadow: 0 8px 24px rgba(28, 27, 25, 0.09);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+               "Segoe UI", sans-serif;
+}
+
+/* Zwei Wege in den dunklen Modus: die Einstellung des Geräts, und — falls
+   diese Seite später in TeilePilot eingebettet wird — dessen `data-theme`.
+   Die ausdrückliche Wahl gewinnt in beide Richtungen. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+  :root:not([data-theme="light"]) {
+    --bg: #151413; --panel: #201f1d; --ink: #f1efec; --muted: #a5a19b;
+    --line: #34322e; --brand: #ebe8e3; --brand-strong: #f1efec;
+    --on-brand: #1a1917; --amber: #f0a83c; --green: #6fca92; --red: #e06c62;
+    --on-red: #1a1917; --soft: #2a2825;
+    --shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1216; --karte: #171b21; --text: #e8eaed; --leise: #98a2b3;
-      --rand: #2a3039; --akzent: #4d8ef7; --akzent-text: #0b0e12;
-      --ok: #4ac97e; --warn: #e0a33e; --fehler: #f97066;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding: max(16px, env(safe-area-inset-top)) 16px
-             max(24px, env(safe-area-inset-bottom));
-    -webkit-text-size-adjust: 100%;
-  }
-  main { max-width: 640px; margin: 0 auto; }
-  h1 { font-size: 1.35rem; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .unterzeile { color: var(--leise); font-size: 0.9rem; margin: 0 0 20px; }
-  .karte {
-    background: var(--karte); border: 1px solid var(--rand);
-    border-radius: 14px; padding: 18px; margin-bottom: 14px;
-  }
-  label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
-  .hinweis { color: var(--leise); font-size: 0.82rem; margin: 6px 0 0; }
-  input[type=email], input[type=password], input[type=text] {
-    width: 100%; padding: 13px 12px; font-size: 16px; color: var(--text);
-    background: var(--bg); border: 1px solid var(--rand); border-radius: 10px;
-  }
-  input[type=file] { width: 100%; font-size: 15px; padding: 8px 0; color: var(--text); }
-  button {
-    width: 100%; padding: 15px; font-size: 16px; font-weight: 650;
-    border: 0; border-radius: 11px; background: var(--akzent);
-    color: var(--akzent-text); cursor: pointer; margin-top: 14px;
-  }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.leise {
-    background: transparent; color: var(--leise);
-    border: 1px solid var(--rand); font-weight: 500; padding: 10px;
-  }
-  .feld + .feld { margin-top: 16px; }
-  .verborgen { display: none !important; }
-  .meldung { padding: 12px 14px; border-radius: 10px; font-size: 0.9rem; margin-top: 14px; }
-  .meldung.fehler { background: color-mix(in srgb, var(--fehler) 14%, transparent); color: var(--fehler); }
-  .meldung.ok     { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
-  .balken { height: 6px; background: var(--rand); border-radius: 3px; overflow: hidden; margin-top: 14px; }
-  .balken > div { height: 100%; width: 0; background: var(--akzent); transition: width 0.25s; }
-  .auftrag { border-top: 1px solid var(--rand); padding: 14px 0; }
-  .auftrag:first-of-type { border-top: 0; padding-top: 4px; }
-  .auftrag h3 { margin: 0 0 4px; font-size: 0.98rem; font-weight: 620; }
-  .auftrag p { margin: 2px 0; font-size: 0.86rem; color: var(--leise); }
-  .status { display: inline-block; font-size: 0.74rem; font-weight: 700;
-            padding: 3px 9px; border-radius: 999px; text-transform: uppercase;
-            letter-spacing: 0.03em; }
-  .status.neu    { background: color-mix(in srgb, var(--leise) 18%, transparent); color: var(--leise); }
-  .status.laeuft { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-  .status.fertig { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
-  .status.fehler { background: color-mix(in srgb, var(--fehler) 18%, transparent); color: var(--fehler); }
-  a { color: var(--akzent); }
-  ul.punkte { margin: 6px 0 0; padding-left: 18px; font-size: 0.84rem; color: var(--warn); }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151413; --panel: #201f1d; --ink: #f1efec; --muted: #a5a19b;
+  --line: #34322e; --brand: #ebe8e3; --brand-strong: #f1efec;
+  --on-brand: #1a1917; --amber: #f0a83c; --green: #6fca92; --red: #e06c62;
+  --on-red: #1a1917; --soft: #2a2825;
+  --shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+}
+
+* { box-sizing: border-box; }
+html { min-height: 100%; background: var(--bg); }
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+
+.app-shell { max-width: 720px; margin: 0 auto; min-height: 100vh; }
+
+/* ------------------------------------------------------------ Kopfzeile -- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  /* Drei Spalten mit gleich breiten Außenspalten — nur so steht der
+     Schriftzug wirklich mittig und nicht bloß ungefähr. */
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  /* viewport-fit=cover lässt die Seite bis unter die Statusleiste laufen;
+     ohne diese Rechnung liegt der Titel auf iPhones mit Dynamic Island
+     unter der Uhrzeit. */
+  padding: calc(14px + env(safe-area-inset-top))
+           calc(14px + env(safe-area-inset-right))
+           10px
+           calc(14px + env(safe-area-inset-left));
+  background: var(--om-dark);
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+:root[data-theme="dark"] .topbar { background: var(--om-dark-2); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .topbar { background: var(--om-dark-2); }
+}
+.brand { min-width: 0; text-align: center; }
+.topbar-platzhalter { display: block; }
+/* Der Schriftzug aus dem Logo: OM, gekreuzte Pleuel, MOTORS. */
+.brand-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.055em;
+  font-stretch: 92%;
+  color: #fff;
+}
+.marke { width: 1.15em; height: 1.15em; flex: 0 0 auto; }
+.brand-sub {
+  margin: 5px 0 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Nur ein Punkt: Solange alles läuft, braucht der Zustand keine Worte.
+   Grün heißt angemeldet, Bernstein heißt: hier kann niemand hochladen. */
+.status-punkt {
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; }
+.dot.offline { background: #f0a83c; }
+
+/* ---------------------------------------------------------------- Seite -- */
+.content { padding: 14px 14px calc(24px + env(safe-area-inset-bottom)); }
+.page-head { margin: 4px 0 14px; }
+.page-head h2 { margin: 0; font-size: 24px; letter-spacing: 0; }
+.page-head p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.card h3 { margin: 0 0 10px; font-size: 15px; }
+.card.soft { background: var(--soft); box-shadow: none; }
+
+.feld + .feld { margin-top: 14px; }
+label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; font-weight: 650; }
+input[type=email], input[type=password], input[type=text] {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 10px 11px;
+  /* 16 px, sonst zoomt iOS beim Antippen in das Feld hinein. */
+  font-size: 16px;
+}
+input[type=file] {
+  width: 100%;
+  padding: 9px 0;
+  color: var(--ink);
+  font-size: 15px;
+}
+.hinweis { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+
+.btn {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 10px 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.btn.primary { background: var(--brand); color: var(--on-brand); border-color: var(--brand); }
+.btn.ghost { background: transparent; color: var(--muted); font-weight: 650; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.verborgen { display: none !important; }
+
+.meldung {
+  padding: 11px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  margin-top: 14px;
+  border: 1px solid transparent;
+}
+.meldung.fehler { background: color-mix(in srgb, var(--red) 12%, var(--panel)); color: var(--red); border-color: color-mix(in srgb, var(--red) 30%, transparent); }
+.meldung.ok     { background: color-mix(in srgb, var(--green) 12%, var(--panel)); color: var(--green); border-color: color-mix(in srgb, var(--green) 30%, transparent); }
+
+.balken { height: 6px; background: var(--soft); border-radius: 999px; overflow: hidden; margin-top: 14px; }
+.balken > div { height: 100%; width: 0; background: var(--brand); transition: width 0.25s; }
+
+/* --------------------------------------------------------- Auftragsliste -- */
+.list { display: grid; gap: 9px; }
+.row {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.row h4 { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.35; }
+.row p { margin: 0; font-size: 13px; color: var(--muted); }
+.row-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row a { color: var(--ink); font-weight: 650; }
+
+.status {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid transparent;
+}
+.status.neu    { background: var(--soft); color: var(--muted); border-color: var(--line); }
+.status.laeuft { background: color-mix(in srgb, var(--amber) 14%, var(--panel)); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 34%, transparent); }
+.status.fertig { background: color-mix(in srgb, var(--green) 14%, var(--panel)); color: var(--green); border-color: color-mix(in srgb, var(--green) 34%, transparent); }
+.status.fehler { background: color-mix(in srgb, var(--red) 14%, var(--panel)); color: var(--red); border-color: color-mix(in srgb, var(--red) 34%, transparent); }
+
+ul.punkte { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--amber); }
+ul.punkte li { margin: 2px 0; }
+.fehlertext { color: var(--red); font-size: 13px; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Auto-Listing</h1>
-  <p class="unterzeile">Fotos hochladen — den Rest macht der Mac.</p>
+<div class="app-shell">
 
-  <!-- ------------------------------------------------------ Anmeldung -->
-  <section id="anmeldung" class="karte verborgen">
-    <div class="feld">
-      <label for="email">E-Mail</label>
-      <input id="email" type="email" autocomplete="username" inputmode="email">
+  <header class="topbar">
+    <span class="topbar-platzhalter" aria-hidden="true"></span>
+    <div class="brand">
+      <!-- Hausmarke: zwei gekreuzte Pleuel. Derselbe Pfad wie kolbenMarke()
+           in TeilePilot — wer den einen ändert, ändert auch den anderen. -->
+      <h1 class="brand-title">OM<svg class="marke" viewBox="0 0 64 64"
+           fill="currentColor" aria-hidden="true" focusable="false"
+        ><g transform="translate(32 32) scale(1.06) rotate(33)"
+          ><rect x="-8.2" y="-28.2" width="16.4" height="4.6" rx="1.4"/><path
+            fill-rule="evenodd" d="M-7.2,-17a7.2,7.2 0 1,0 14.4,0a7.2,7.2 0 1,0 -14.4,0 M-3.2,-17a3.2,3.2 0 1,0 6.4,0a3.2,3.2 0 1,0 -6.4,0"/><path
+            d="M-5,-12.5 L5,-12.5 L3.4,15.5 L-3.4,15.5 Z"/><path
+            fill-rule="evenodd" d="M-5,19a5,5 0 1,0 10,0a5,5 0 1,0 -10,0 M-2.3,19a2.3,2.3 0 1,0 4.6,0a2.3,2.3 0 1,0 -4.6,0"/></g
+        ><g transform="translate(32 32) scale(1.06) rotate(-33)"
+          ><rect x="-8.2" y="-28.2" width="16.4" height="4.6" rx="1.4"/><path
+            fill-rule="evenodd" d="M-7.2,-17a7.2,7.2 0 1,0 14.4,0a7.2,7.2 0 1,0 -14.4,0 M-3.2,-17a3.2,3.2 0 1,0 6.4,0a3.2,3.2 0 1,0 -6.4,0"/><path
+            d="M-5,-12.5 L5,-12.5 L3.4,15.5 L-3.4,15.5 Z"/><path
+            fill-rule="evenodd" d="M-5,19a5,5 0 1,0 10,0a5,5 0 1,0 -10,0 M-2.3,19a2.3,2.3 0 1,0 4.6,0a2.3,2.3 0 1,0 -4.6,0"/></g
+        ></svg>MOTORS</h1>
+      <p class="brand-sub">Auto-Listing</p>
     </div>
-    <div class="feld">
-      <label for="passwort">Passwort</label>
-      <input id="passwort" type="password" autocomplete="current-password">
-    </div>
-    <button id="anmelden">Anmelden</button>
-    <div id="anmeldefehler" class="meldung fehler verborgen"></div>
-    <p class="hinweis">
-      Das Konto legst du einmalig in Supabase an (Authentication → Users).
-      Ohne Anmeldung kann niemand hochladen, der die Adresse dieser Seite kennt.
-    </p>
-  </section>
+    <span class="status-punkt" id="statuspunkt" title="Anmeldestatus">
+      <span class="dot offline" id="statusdot"></span>
+    </span>
+  </header>
 
-  <!-- --------------------------------------------------------- Upload -->
-  <section id="upload" class="karte verborgen">
-    <div class="feld">
-      <label for="fotos">Fotos vom Teil</label>
-      <!-- HEIC MUSS hier stehen. Mit accept="image/*" allein wandelt iOS die
-           Fotos aus der Mediathek beim Hochladen nach JPEG um und verkleinert
-           sie dabei: Am 2026-08-07 kamen aus 3024x4032 (2,6 MB) nur noch
-           1600x2134 (0,5 MB) an. Fuer die Texterkennung ist das zu wenig —
-           laut CLAUDE.md zerfaellt die Teilenummer schon unter 3000 px.
-           Wird HEIC ausdruecklich genannt, reicht iOS das Original durch;
-           der Mac wandelt es selbst um (pillow-heif). -->
-      <input id="fotos" type="file" multiple
-             accept="image/heic,image/heif,image/jpeg,image/png,image/*">
+  <main class="content">
+    <div class="page-head">
+      <h2>Fotos hochladen</h2>
+      <p>Den Rest macht der Mac: Teilenummer lesen, Preis rechnen, eBay-Entwurf anlegen.</p>
+    </div>
+
+    <!-- ---------------------------------------------------- Anmeldung -->
+    <section id="anmeldung" class="card verborgen">
+      <div class="feld">
+        <label for="email">E-Mail</label>
+        <input id="email" type="email" autocomplete="username" inputmode="email">
+      </div>
+      <div class="feld">
+        <label for="passwort">Passwort</label>
+        <input id="passwort" type="password" autocomplete="current-password">
+      </div>
+      <button id="anmelden" class="btn primary">Anmelden</button>
+      <div id="anmeldefehler" class="meldung fehler verborgen"></div>
       <p class="hinweis">
-        Mindestens ein Foto der eingestanzten Teilenummer — möglichst scharf und
-        formatfüllend. Die Bilder werden in Originalgröße übertragen, weil die
-        Texterkennung an verkleinerten Fotos nachweislich scheitert.
+        Das Konto legst du einmalig in Supabase an (Authentication → Users).
+        Ohne Anmeldung kann niemand hochladen, der die Adresse dieser Seite kennt.
       </p>
-    </div>
-    <div class="feld">
-      <label for="bezeichnung">Teilenummer (optional)</label>
-      <input id="bezeichnung" type="text" inputmode="latin"
-             placeholder="z. B. 8K0857552 — leer lassen, wenn unbekannt">
-      <p class="hinweis">
-        Wenn du die Nummer kennst, trag sie ein: dann wird sie direkt verwendet,
-        statt sie aus dem Foto zu lesen.
-      </p>
-    </div>
-    <button id="absenden">Hochladen</button>
-    <div class="balken verborgen" id="balken"><div></div></div>
-    <div id="uploadmeldung" class="meldung verborgen"></div>
-  </section>
+    </section>
 
-  <!-- -------------------------------------------------------- Aufträge -->
-  <section id="liste" class="karte verborgen">
-    <h2 style="font-size:1rem;margin:0 0 10px">Letzte Aufträge</h2>
-    <div id="auftraege"><p class="hinweis">Wird geladen …</p></div>
-    <button class="leise" id="abmelden">Abmelden</button>
-  </section>
-</main>
+    <!-- ------------------------------------------------------- Upload -->
+    <section id="upload" class="card verborgen">
+      <div class="feld">
+        <label for="fotos">Fotos vom Teil</label>
+        <!-- HEIC MUSS hier stehen. Mit accept="image/*" allein wandelt iOS die
+             Fotos aus der Mediathek beim Hochladen nach JPEG um und verkleinert
+             sie dabei: Am 2026-08-07 kamen aus 3024x4032 (2,6 MB) nur noch
+             1600x2134 (0,5 MB) an. Fuer die Texterkennung ist das zu wenig —
+             laut CLAUDE.md zerfaellt die Teilenummer schon unter 3000 px.
+             Wird HEIC ausdruecklich genannt, reicht iOS das Original durch;
+             der Mac wandelt es selbst um (pillow-heif). -->
+        <input id="fotos" type="file" multiple
+               accept="image/heic,image/heif,image/jpeg,image/png,image/*">
+        <p class="hinweis">
+          Mindestens ein Foto der eingestanzten Teilenummer — möglichst scharf und
+          formatfüllend. Die Bilder werden in Originalgröße übertragen, weil die
+          Texterkennung an verkleinerten Fotos nachweislich scheitert.
+        </p>
+      </div>
+      <div class="feld">
+        <label for="bezeichnung">Teilenummer (optional)</label>
+        <input id="bezeichnung" type="text" inputmode="latin"
+               placeholder="z. B. 8K0857552 — leer lassen, wenn unbekannt">
+        <p class="hinweis">
+          Wenn du die Nummer kennst, trag sie ein: dann wird sie direkt verwendet,
+          statt sie aus dem Foto zu lesen.
+        </p>
+      </div>
+      <button id="absenden" class="btn primary">Hochladen</button>
+      <div class="balken verborgen" id="balken"><div></div></div>
+      <div id="uploadmeldung" class="meldung verborgen"></div>
+    </section>
+
+    <!-- ------------------------------------------------------ Aufträge -->
+    <section id="liste" class="card verborgen">
+      <h3>Letzte Aufträge</h3>
+      <div id="auftraege" class="list"><p class="hinweis">Wird geladen …</p></div>
+      <button class="btn ghost" id="abmelden">Abmelden</button>
+    </section>
+  </main>
+
+</div>
 
 <script src="config.js"></script>
 <script>
@@ -270,20 +493,22 @@ async function auftraegeLaden() {
       return;
     }
     ziel.innerHTML = zeilen.map((a) => {
-      const teile = [`<span class="status ${a.status}">${a.status}</span>`];
+      const teile = [];
       if (a.preis) teile.push(`${Number(a.preis).toFixed(2).replace(".", ",")} €`);
       if (a.versandstufe) teile.push(`Versand ${a.versandstufe}`);
+      teile.push(`${a.fotos.length} Foto(s)`);
+      teile.push(zeitText(a.erstellt_am));
       const punkte = (a.offene_punkte || []).length
         ? `<ul class="punkte">${a.offene_punkte.map(
              (p) => `<li>${entschaerfen(p)}</li>`).join("")}</ul>`
         : "";
-      return `<div class="auftrag">
-        <h3>${entschaerfen(a.titel || a.bezeichnung || "(ohne Bezeichnung)")}</h3>
-        <p>${teile.join(" · ")}</p>
-        <p>${a.fotos.length} Foto(s) · ${zeitText(a.erstellt_am)}</p>
+      return `<div class="row">
+        <div class="row-kopf"><span class="status ${a.status}">${a.status}</span></div>
+        <h4>${entschaerfen(a.titel || a.bezeichnung || "(ohne Bezeichnung)")}</h4>
+        <p>${teile.filter(Boolean).join(" · ")}</p>
         ${a.entwurf_url ? `<p><a href="${a.entwurf_url}" target="_blank"
-             rel="noopener">Entwurf bei eBay öffnen</a></p>` : ""}
-        ${a.fehler ? `<p style="color:var(--fehler)">${entschaerfen(a.fehler)}</p>` : ""}
+             rel="noopener">Entwurf bei eBay öffnen →</a></p>` : ""}
+        ${a.fehler ? `<p class="fehlertext">${entschaerfen(a.fehler)}</p>` : ""}
         ${punkte}
       </div>`;
     }).join("");
@@ -306,6 +531,9 @@ function oberflaeche() {
   zeigen($("anmeldung"), !drin);
   zeigen($("upload"), drin);
   zeigen($("liste"), drin);
+  // Der Punkt in der Kopfzeile sagt ohne Worte, ob hochgeladen werden kann.
+  $("statusdot").classList.toggle("offline", !drin);
+  $("statuspunkt").title = drin ? "Angemeldet" : "Nicht angemeldet";
   if (drin) auftraegeLaden();
 }
 

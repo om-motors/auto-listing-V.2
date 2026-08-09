@@ -90,6 +90,35 @@ Auswahl fürs Benennen wurde aus „Steuergerät Feststellbremse" prompt
 „Feststellbremssteuergerät" — mit der weiten fürs Rechnen war der Preis 2 €
 zu hoch.
 
+## Aussehen: Hausstil von OM Motors
+
+Die Upload-Seite (`web/index.html`) trägt seit dem 2026-08-09 den **Hausstil
+der Schwester-Anwendung TeilePilot** (`om-motors/autoteilewawi`, dort
+`Code/styles.css`). Grund: Auto-Listing soll später in TeilePilot aufgehen —
+was jetzt schon gleich aussieht, muss dann nicht umgezogen werden.
+
+- **Farbwelt aus dem Logo:** weiße Marke auf warmem Anthrazit `#2c2c2c`. Es
+  gibt nur einen Farbton, der Unterschied zwischen Knopf und Fläche entsteht
+  über **Helligkeit**, nicht über Buntheit.
+- **Warme Grautöne**, kein neutrales Grau — neben dem Anthrazit wirkt
+  neutrales Grau blaustichig.
+- **Kein Blau.** Die Seite lief bis dahin auf `#1f6feb`; TeilePilot hat Blau
+  ausdrücklich abgelegt. Wer es wieder einführt, bricht den Hausstil.
+- **Bernstein und Rot sind Signale**, keine Markenfarben — „prüfen",
+  „fehlgeschlagen".
+- **Dunkelmodus kippt die Rollen:** dort ist der *helle* Knopf die Aktion,
+  ein anthrazitfarbener wäre auf anthrazitfarbenem Grund unsichtbar. Deshalb
+  gibt es `--on-brand` als eigene Variable.
+- Erkannt wird er über `prefers-color-scheme` **und** `data-theme` — Letzteres
+  setzt TeilePilot selbst, damit die Seite eingebettet mitzieht.
+
+Die Hausmarke (zwei gekreuzte Pleuel) steckt als Inline-SVG in der Kopfzeile.
+**Derselbe Pfad wie `kolbenMarke()` in TeilePilot** — wer den einen ändert,
+muss den anderen mitziehen.
+
+Veröffentlicht wird die Seite mit `npx wrangler deploy`; ein `git push` allein
+ändert nichts an dem, was auf dem Handy ankommt.
+
 ## Tests
 
 Ohne zusätzliches Paket, mit dem eingebauten `unittest`:
