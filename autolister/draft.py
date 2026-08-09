@@ -1252,13 +1252,6 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         _step(warnings, "Hintergrund entfernen", hintergrund, hintergrund_kontrolle)
 
     # --- Zustand: Gebraucht ---
-    def set_condition():
-        knopf = page.locator("button.condition-recommendation-value",
-                             has_text=re.compile(r"^\s*Gebraucht\s*$")).first
-        if not knopf.count():
-            knopf = page.get_by_role("button", name="Gebraucht", exact=True).first
-        knopf.click(timeout=8000)
-
     def zustand_kontrolle():
         # Der gewählte Zustand steht im Zusammenfassungsknopf
         # button[name='condition'] (#summary-condition-field-value) — am echten
@@ -1273,6 +1266,23 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
             except Exception:
                 continue
         return False
+
+    def set_condition():
+        # **Erst nachsehen, dann klicken.** Seit dem 2026-08-09 fragt eBay den
+        # Zustand bereits vor dem Formular ab (`_zustand_vorab_waehlen`), er
+        # steht hier also meist schon richtig. Der alte Klickversuch lief dann
+        # in einen Timeout von 8 s, `_step` brach ab, ohne die Kontrolle je
+        # auszuführen — und der Bericht verlangte Handarbeit für einen Wert,
+        # der längst im Entwurf stand. So gemessen an allen drei Teilen des
+        # Laufs vom 2026-08-09.
+        if zustand_kontrolle():
+            log.info("Zustand steht bereits auf 'Gebraucht'")
+            return
+        knopf = page.locator("button.condition-recommendation-value",
+                             has_text=re.compile(r"^\s*Gebraucht\s*$")).first
+        if not knopf.count():
+            knopf = page.get_by_role("button", name="Gebraucht", exact=True).first
+        knopf.click(timeout=8000)
     _step(warnings, "Zustand 'Gebraucht'", set_condition, zustand_kontrolle)
 
     # --- Beschreibung (Rich-Text-Editor in einem iframe) ---
