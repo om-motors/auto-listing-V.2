@@ -84,6 +84,42 @@ class TrefferNachNummer(unittest.TestCase):
         self.assertNotIn("8K0907801J", namen)
 
 
+class Teilname(unittest.TestCase):
+    """Das Bestimmungswort entscheidet über den Versandpreis."""
+
+    # Echte Titel aus Berichte/2026-08-09_1838_8K0857085B.md. Verkauft wird
+    # die Kunststoffabdeckung des Armaturenbretts, nicht das Armaturenbrett.
+    # „abdeckung" steht in 10 von 22 Titeln (45 %) — bei der früheren Schwelle
+    # von 50 % fiel es durch, das Teil hieß „Armaturenbrett" und bekam
+    # Spedition zu 60,00 € statt Standard zu 7,69 €.
+    ABDECKUNG = angebote(
+        ("Audi A4 8K B8 Verkleidung Armaturenbrett vorne links 8K0857085B", 12.50),
+        ("Audi A5 8T A4 8K Abdeckung Abdeckkappe Armaturenbrett links 8K0857085B", 14.79),
+        ("Orig Audi A5 8F Cabrio Armaturenbrett Seitenverkleidung links 8K0857085B", 14.90),
+        ("Armaturenbrett Abdeckung Verkleidung links Audi A5 8T A4 B8 8K0857085B", 14.95),
+        ("Blende Armaturenbrett seitlich Links 8K0857085B Audi A5 2.0 TDI", 16.50),
+        ("Blende Armaturenbrett Links Rechts 8K0857085B Audi A5 2.0 TDI", 17.50),
+        ("Armaturenbrett Abdeckung links rechts Set stahlgrau Audi A4 8K0857085B", 18.40),
+        ("Armaturenbrett Abdeckung links und rechts Set Audi A4 B8 8K 8K0857085B", 18.90),
+        ("Original Audi A4 8K A5 8T Abdeckung Armaturenbrett Blende links 8K0857085B", 19.00),
+        ("Blende Armaturenbrett Links Audi 8K0857085B B8 A4 Avant 2.0 TDI", 24.90),
+        ("Armaturenbrett Abdeckung links rechts Set soul schwarz Audi 8K0857085B", 24.95),
+        ("Blende Armaturenbrett seitlich Links 8K0857085B 8K0857086B Audi A5", 26.50),
+    )
+
+    def test_huellwort_bleibt_vor_dem_hauptwort(self):
+        indizes = list(range(len(self.ABDECKUNG)))
+        self.assertEqual(ableiten.teilname(self.ABDECKUNG, indizes),
+                         "Abdeckung Armaturenbrett")
+
+    def test_und_damit_die_kleine_versandstufe(self):
+        indizes = list(range(len(self.ABDECKUNG)))
+        teil = ableiten.teilname(self.ABDECKUNG, indizes)
+        self.assertEqual(ableiten.versandstufe(teil), "Standard")
+        # Ohne das Bestimmungswort wäre es die teuerste Stufe gewesen
+        self.assertEqual(ableiten.versandstufe("Armaturenbrett"), "Spedition")
+
+
 class Preisrechnung(unittest.TestCase):
     """Der Preis folgt der schärferen Auswahl — und sagt, worauf er beruht."""
 

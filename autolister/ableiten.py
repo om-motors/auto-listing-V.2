@@ -235,7 +235,19 @@ def teilname(angebote: List[Dict], indizes: List[int]) -> Optional[str]:
     # das Teil im Inserat schlicht „Feststellbremse" — also die Bremse selbst
     # statt ihres Steuergeräts. Ein Käufer, der danach sucht, findet das Teil
     # nicht, und wer es kauft, erwartet etwas anderes.
-    haeufig = max(2, hoechste * 0.5)
+    # Dieselbe Schwelle wie oben für das Hauptwort (0,3). Sie lag bis zum
+    # 2026-08-09 bei 0,5 — mitten in der natürlichen Streuung, und beim
+    # Kippen sprang die Versandstufe.
+    #
+    # Am Teil 8K0857085B gemessen, derselbe Artikel an zwei Tagen:
+    #   07.08.: „abdeckung" in 13 von 20 Titeln (65 %) -> „Abdeckung
+    #           Armaturenbrett" -> Standard, 7,69 €
+    #   09.08.: „abdeckung" in 10 von 22 Titeln (45 %) -> „Armaturenbrett"
+    #           -> Spedition, 60,00 €
+    # Eine Kunststoffabdeckung für 17,90 € mit 60 € Versand verkauft sich
+    # nicht. Und der Käufer, der ein Armaturenbrett bestellt, bekäme dessen
+    # Abdeckung — beides Folgen derselben verrutschten Schwelle.
+    haeufig = max(2, hoechste * 0.3)
     for wort in GERAETEWOERTER:
         if zaehler.get(wort, 0) >= haeufig and wort not in beste:
             return "%s %s" % (wort.capitalize(), beste.capitalize())
