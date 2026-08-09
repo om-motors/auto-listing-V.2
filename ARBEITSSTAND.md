@@ -793,20 +793,51 @@ ist alles gut; wird es umbenannt, müssen sie mitkopiert werden.
 
 ## Nächste Schritte
 
-- [ ] **F1 beheben** — die falsche Versandstufe ist der einzige Fehler, der im
-      Echtlauf tatsächlich Geld gekostet hätte. Schnellster Nutzen.
-- [ ] **D1 + D2 nachrüsten** — Angebotsformat und internationale Rücknahme
-      stimmen derzeit nur, weil eBays Voreinstellung zufällig passt
-- [ ] **E4** — die Tipp-Fenster-Selektoren treffen nicht; beim Nachbessern
-      gleich A1 mit erledigen (Blindklick raus, Positivliste rein)
+> Diese Liste war bis 2026-08-08 veraltet: F1, D1, D2 und E4 standen als offen
+> darin, obwohl sie seit dem 2026-08-01 behoben sind. Am Code nachgeprüft
+> (`draft.py:1198` Angebotsformat, `draft.py:1388` Auslandsversand,
+> `_dialoge_schliessen` läuft vollständig über `_safe_click`,
+> `ableiten.versandstufe` prüft den Teilnamen zuerst). Wer hier etwas abhakt,
+> soll es bitte auch streichen — eine To-do-Liste, die Erledigtes führt, ist
+> so irreführend wie ein Bericht, der lügt.
+
+**Zuerst — beides braucht einen echten Lauf, kein Nachdenken:**
+
+- [ ] **Erster Lauf unter `om.motors` beobachten.** Nicht wegen der Preise,
+      sondern weil die Veröffentlichungssperre nie herausgefordert wurde. Ab
+      jetzt steht ein Fehlklick im echten Konto.
+- [ ] **Die geschärfte Preisrechnung an einem echten Teil mit
+      Nachsatzbuchstaben prüfen.** Bisher nur an Berichtsdaten gerechnet.
+
+**Danach, nach Nutzen sortiert:**
+
+- [ ] **A7** — implizites Submit durch Enter. `feld.press("Enter")` läuft in
+      `draft.py:595` bei jedem frei getippten Merkmal. Liegt das Feld in einem
+      `<form>`, aktiviert HTML dessen ersten Submit-Knopf, und Tastendrücke
+      laufen an `_safe_click` vorbei. Ein Zweizeiler klärt es:
+      `feld.evaluate("e => !!e.form")` an einer Merkmalzeile.
+- [ ] **E2** — `_check_captcha` erkennt nur URL-Muster (`captcha`, `splashui`).
+      Eine Sicherheitsabfrage als Overlay auf derselben Adresse führt zu
+      Timeout-Kaskaden und einer Fehlermeldung, die eine kaputte Selektorlage
+      nahelegt statt `python -m autolister.login`.
+- [ ] **E3** — bei einem Abbruch mittendrin bleibt ein halb gefüllter
+      Auto-Save-Entwurf bei eBay liegen. `DraftError` trägt keine `draft_url`,
+      der Bericht nennt keine Adresse, und der nächste Lauf legt einen zweiten
+      Entwurf für dasselbe Teil an.
+- [ ] **Nahaufnahmen gar nicht erst freistellen** — eBay kann das Teil dort
+      nicht isolieren. Kein Fehler, aber der Bericht meldet „N von M" und sieht
+      nach Fehlschlag aus.
+- [ ] **Internationaler Versand einschalten** — wenn der Nutzer die
+      Versandkosten dafür kennt. Stelle: `isInternationalShippingOn` in
+      `_fill_form`.
 - [ ] Widerlegungsrunde für die mit ❓ markierten Funde nachholen
 - [ ] Blickwinkel „lügen die Kontrollfunktionen?" vollständig prüfen (Prüfer fiel aus)
 - [ ] Selektor-Brüchigkeit systematisch bewerten (Abschnitt C ist unvollständig)
-- [ ] Testentwurf `draftId=5184972239823` aufräumen, wenn er nicht mehr gebraucht wird
+- [ ] Entwürfe im alten Testkonto `samekili9` aufräumen (rund sechs Stück,
+      darunter `draftId=5184972239823`) — sie stören nicht, können aber weg
 
-Offen geblieben, weil der Echtlauf sie nicht herausgefordert hat: A1, A2, A5, A7,
-B2–B5, C1, C2. Für A7 (implizites Submit durch Enter) wäre ein gezielter Test
-nötig: `feld.evaluate("e => !!e.form")` an einer Merkmalzeile.
+Offen geblieben, weil kein Echtlauf sie herausgefordert hat: A1, A2, A5, A7,
+B2–B5, C1, C2. Behoben sind sie im Code; **erprobt sind sie nicht.**
 
 ---
 
