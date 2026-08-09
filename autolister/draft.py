@@ -873,6 +873,141 @@ def _hintergrund_entfernen(page, anzahl: int, warnings: List[str]) -> int:
     return geaendert
 
 
+def _warnung_einmal(warnings: List[str], text: str) -> None:
+    """Dieselbe Warnung nur einmal in den Bericht schreiben.
+
+    Die Warteschleife vor dem Formular fragt im Halbsekundentakt nach. Eine
+    Warnung, die dort ungeprüft angehängt wird, steht am Ende rund 120-mal im
+    Bericht und begräbt alles andere unter sich.
+    """
+    if text not in warnings:
+        warnings.append(text)
+
+
+# Zustandsschlüssel von eBay, an der echten Seite abgelesen (2026-08-09):
+# 1000 Neu · 1500 Neu: Sonstige · 2500 Generalüberholt · 3000 Gebraucht ·
+# 7000 Als Ersatzteil/defekt. Für dieses Projekt ist es immer "Gebraucht" —
+# so steht es in CLAUDE.md unter den fachlichen Vorgaben.
+ZUSTAND_GEBRAUCHT = "3000"
+
+
+def _zustand_vorab_waehlen(page, warnings: List[str]) -> bool:
+    """Die Zwischenseite „Bestätigen Sie die Details" beantworten.
+
+    eBay fragt den Artikelzustand seit dem 2026-08-09 **vor** dem Formular ab,
+    unter derselben Adresse wie die Kategoriewahl — erkennbar allein am
+    Anhängsel `view=sellnode-condition`. Die Pipeline kannte den Schritt
+    nicht, wartete 60 Sekunden auf ein Formular, das nie kam, und meldete
+    „Verkaufsformular wurde nicht erreicht". Daran scheiterten alle drei Teile
+    des ersten Laufs unter `om.motors`.
+
+    Aufbau, an der echten Seite ausgemessen:
+
+        legend                             "Wählen Sie den Artikelzustand aus"
+        input[type=radio][name=condition]  value 1000/1500/2500/3000/7000
+        button                             "Weiter zum Angebot"
+
+    Das `input` liegt unter einer gestalteten Hülle und gilt damit als
+    unsichtbar — ein gewöhnliches `check()` scheitert daran. Deshalb erst der
+    normale Weg, dann `force`, und in beiden Fällen wird über `is_checked()`
+    nachgesehen, ob die Auswahl wirklich sitzt.
+    """
+    if "sellnode-condition" not in (page.url or ""):
+        return False
+
+    ziel = page.locator("input[type=radio][name='condition'][value='%s']"
+                        % ZUSTAND_GEBRAUCHT).first
+    if not ziel.count():
+        _warnung_einmal(warnings, "Zustand vorab: Auswahl 'Gebraucht' nicht "
+                                  "gefunden — bitte selbst im Entwurf setzen")
+        return False
+
+    gesetzt = False
+    for erzwingen in (False, True):
+        try:
+            ziel.check(force=erzwingen, timeout=4000)
+            gesetzt = ziel.is_checked()
+        except Exception:  # noqa: BLE001 — der zweite Versuch darf noch greifen
+            gesetzt = False
+        if gesetzt:
+            break
+    if not gesetzt:
+        _warnung_einmal(warnings, "Zustand vorab: 'Gebraucht' ließ sich nicht "
+                                  "auswählen — bitte selbst im Entwurf setzen")
+        return False
+    _pause(page, 800)
+
+    weiter = page.get_by_role(
+        "button", name=re.compile(r"^\s*Weiter zum Angebot\s*$", re.I)).first
+    if not weiter.count():
+        _warnung_einmal(warnings, "Zustand vorab: Knopf 'Weiter zum Angebot' "
+                                  "nicht gefunden")
+        return False
+    _safe_click(page, weiter, warnings, "Zustand bestätigen")
+    _settle(page)
+
+    # Kontrolle: Die Zwischenseite muss weg sein. Ohne sie gälte der Schritt
+    # als erledigt, sobald keine Ausnahme flog — und die Warteschleife liefe
+    # weiter im Kreis, genau wie vorher.
+    if "sellnode-condition" in (page.url or ""):
+        _warnung_einmal(warnings, "Zustand vorab: Seite blieb nach dem "
+                                  "Bestätigen stehen")
+        return False
+    log.info("Zustand vorab gewählt: Gebraucht")
+    return True
+
+
+# Wie der Knopf heißt, mit dem man die Produktbibliothek übergeht. Am
+# 2026-08-09 trug er „Ohne passendes Produkt fortfahren"; die übrigen
+# Schreibweisen sind ältere Fassungen, die eBay schon benutzt hat.
+PRODUKT_UEBERGEHEN = ("Ohne passendes Produkt fortfahren",
+                      "Ohne Übereinstimmung fortfahren",
+                      "Ohne Produktübereinstimmung fortfahren")
+
+
+def _produktauswahl_uebergehen(page, warnings: List[str]) -> bool:
+    """Die Seite „Passendes Produkt finden" übergehen.
+
+    Kennt eBay die Kategorie bereits, bietet es stattdessen Produkte aus
+    seiner Bibliothek an („Top-Auswahl aus der Produktbibliothek",
+    „Vergleichbare Angebote von anderen Verkäufern"). Auch diese Seite läuft
+    unter `/sl/prelist/identify`, hat aber weder Kategoriekarten noch
+    Zustandsauswahl — die Pipeline lief hier ins Leere. Am 2026-08-09
+    scheiterte das Steuergerät `8K0907801J` genau daran, während die beiden
+    anderen Teile an der Zustandsabfrage hingen.
+
+    **Ein Katalogprodukt wird bewusst nicht gewählt.** Es brächte Titel und
+    Artikelmerkmale von eBay mit und würde damit überschreiben, was
+    `compose.py` aus den Vergleichsangeboten hergeleitet hat.
+
+        button.product-button...      Katalogprodukte  <- nicht anfassen
+        button "Ohne passendes Produkt fortfahren"     <- dieser hier
+    """
+    if "/prelist/identify" not in (page.url or ""):
+        return False
+
+    vorher = page.url
+    for name in PRODUKT_UEBERGEHEN:
+        knopf = page.get_by_role(
+            "button", name=re.compile(r"^\s*%s\s*$" % re.escape(name), re.I)).first
+        try:
+            if not knopf.count() or not knopf.is_visible():
+                continue
+        except Exception:  # noqa: BLE001 — nächste Schreibweise probieren
+            continue
+        if not _safe_click(page, knopf, warnings, "Produktauswahl übergehen"):
+            continue
+        _settle(page)
+        # Kontrolle: Der Klick muss die Seite weiterbringen. Bleibt die
+        # Adresse stehen, hat er nichts bewirkt — dann soll die Schleife es
+        # anders versuchen, statt den Schritt als erledigt zu verbuchen.
+        if page.url == vorher:
+            continue
+        log.info("Produktauswahl übergangen ('%s')", name)
+        return True
+    return False
+
+
 def _kategorie_waehlen(page, warnings: List[str]) -> bool:
     """Die Kategorieabfrage auf `/sl/prelist/identify` beantworten.
 
@@ -895,10 +1030,22 @@ def _kategorie_waehlen(page, warnings: List[str]) -> bool:
     Text: nur die Empfehlungen enthalten den vollen Pfad. Genommen wird die
     erste — das ist eBays eigener bester Vorschlag zum Titel.
     """
-    if "/prelist/identify" not in (page.url or ""):
+    url = page.url or ""
+    if "/prelist/identify" not in url or "sellnode-condition" in url:
+        # Die Zustandsabfrage läuft unter derselben Adresse. Ohne diese
+        # Ausnahme sucht die Funktion dort vergeblich nach Kategoriekarten und
+        # legt bei jedem Schleifendurchlauf eine Warnung nach — am 2026-08-09
+        # rund 120 Stück je Auftrag.
         return False
 
     karten = page.locator("button.se-field-card__body")
+    if not karten.count():
+        # Gar keine Kategoriekarten heißt: Das ist nicht die Kategorieseite,
+        # sondern eine der Schwestern (Produktbibliothek, Zustandsabfrage).
+        # Hier zu warnen wäre schlicht falsch und schickt den Nutzer an die
+        # falsche Stelle.
+        return False
+
     gewaehlt = ""
     for i in range(min(karten.count(), 40)):
         karte = karten.nth(i)
@@ -913,8 +1060,8 @@ def _kategorie_waehlen(page, warnings: List[str]) -> bool:
             break
 
     if not gewaehlt:
-        warnings.append("Kategorieauswahl: keine empfohlene Kategorie gefunden — "
-                        "im Entwurf von Hand setzen")
+        _warnung_einmal(warnings, "Kategorieauswahl: keine empfohlene Kategorie "
+                                  "gefunden — im Entwurf von Hand setzen")
         return False
 
     _pause(page, 1500)
@@ -980,10 +1127,29 @@ def _fill_form(page, listing, vision, description, photos, warnings, work_dir,
         _check_captcha(page)
         if "draftId" in page.url or "/lstng" in page.url:
             break
+        # Drei verschiedene Zwischenseiten, alle unter `/sl/prelist/identify`:
+        # Produktbibliothek, Kategoriewahl, Zustandsabfrage. Welche kommt,
+        # hängt davon ab, wie sicher eBay den Titel einordnen kann — beim
+        # Steuergerät erschien die erste, bei den beiden anderen Teilen des
+        # Laufs vom 2026-08-09 die dritte. Jede Funktion prüft selbst, ob sie
+        # zuständig ist, und meldet mit `True`, dass sich etwas bewegt hat.
+        if _produktauswahl_uebergehen(page, warnings):
+            continue
+        if _zustand_vorab_waehlen(page, warnings):
+            continue
         _kategorie_waehlen(page, warnings)
         _pause(page, 500)
     if "draftId" not in page.url and "/lstng" not in page.url:
-        raise DraftError("Verkaufsformular wurde nicht erreicht (URL: %s)" % page.url)
+        # Sagen, WO es hing. "Formular nicht erreicht" allein hat am
+        # 2026-08-09 nach kaputten Selektoren ausgesehen, während in Wahrheit
+        # eine unbekannte Zwischenseite davorstand.
+        stelle = ""
+        if "sellnode-condition" in page.url:
+            stelle = " — die Zustandsabfrage ließ sich nicht beantworten"
+        elif "/prelist/identify" in page.url:
+            stelle = " — die Kategorieabfrage ließ sich nicht beantworten"
+        raise DraftError("Verkaufsformular wurde nicht erreicht%s (URL: %s)"
+                         % (stelle, page.url))
     draft_url = page.url
 
     def _entwurfsadresse() -> str:
