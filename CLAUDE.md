@@ -163,6 +163,25 @@ Alle Selektoren am echten Formular ermittelt und per Trockenlauf verifiziert.
 
 - `ebay.de/sl/prelist/suggest` → Titel eingeben → „Weiter" → das Formular
   legt sofort einen Entwurf an (`draftId` in der URL).
+- **Dazwischen schiebt eBay bis zu drei Zwischenseiten ein — alle unter
+  derselben Adresse `/sl/prelist/identify`.** Welche kommt, hängt davon ab,
+  wie sicher eBay den Titel einordnen kann; unterschieden werden sie am
+  `view`-Anhängsel bzw. am Inhalt:
+
+  | Seite | Erkennung | Antwort |
+  |---|---|---|
+  | Kategorie | `button.se-field-card__body` mit „ > " im Text | eBays ersten eigenen Vorschlag |
+  | Produktbibliothek | Knopf „Ohne passendes Produkt fortfahren" | **kein** Katalogprodukt wählen — es brächte Titel und Merkmale von eBay mit und überschriebe, was `compose.py` hergeleitet hat |
+  | Zustand | `view=sellnode-condition` | Radio `name=condition`, Wert `3000` = Gebraucht |
+
+  Am 2026-08-09 kannte die Pipeline die letzten beiden nicht, wartete
+  60 Sekunden auf ein Formular, das nie kam, und meldete „Verkaufsformular
+  wurde nicht erreicht" — alle drei Teile eines Laufs scheiterten daran.
+  Wer hier einen Fehler sucht: Die Meldung nennt inzwischen die Stelle.
+- Ist der Zustand schon auf der Zwischenseite gesetzt, steht er im Formular
+  bereits richtig. Der Schritt dort **prüft zuerst und klickt nur, wenn
+  nötig** — sonst lief er in einen Timeout und verlangte Handarbeit für
+  einen Wert, der längst im Entwurf stand.
 - Über einem **frisch angelegten** Entwurf liegt ein modaler Dialog
   („Zum erweiterten Verkaufsformular wechseln"), der jeden Klick blockiert.
   Bei einem *nachgeladenen* Entwurf erscheint er nicht — deshalb war er bei
@@ -208,13 +227,29 @@ Aufbau einer Zeile: Beschriftung, sichtbarer Aufklapp-Knopf
 3. Das Feld liegt im **direkten Elternelement** des Knopfes
    (`div.fake-menu-button`). Ein globales `.first` traf nach dem ersten
    gesetzten Merkmal weiterhin dessen Feld — alle folgenden blieben leer.
-4. Das Feld heißt real `OE/OEM Referenznummer(n)`; exakter Vergleich schlägt
-   fehl, Präfix-Vergleich nötig. Und sobald ein Merkmal gefüllt ist,
-   **entfernt eBay dessen `aria-label`**.
+4. **Niemals per Präfix suchen.** Das Feld heißt real
+   `OE/OEM Referenznummer(n)`, ein exakter Vergleich geht daran vorbei — aber
+   ein Präfixvergleich lässt „Hersteller" das Feld „Herstellernummer"
+   greifen. `_merkmal_gleich()` vergleicht deshalb exakt und verzeiht nur
+   Klammerzusätze. Und sobald ein Merkmal gefüllt ist, **entfernt eBay
+   dessen `aria-label`**.
 
-**Zum Zurücklesen deshalb nur über die Position gehen.** Am echten Formular
-nachgemessen (2026-08-02) — die gefüllten Felder trugen `aria=''` mit dem Text
-`Audi`, `Sonnenblende`, `8K0857552`, nur die leeren noch ihren Namen:
+**Merkmale gibt es nur je Kategorie.** In „ECUs & Steuergeräte" existiert
+*kein* Merkmal „Hersteller", in „Sonstige" *keine* „Produktart". Am
+2026-08-09 schrieb der Präfixvergleich deshalb „Audi" in die
+Herstellernummer und die Teilenummer gleich hinterher — das Feld zeigte
+„Audi (+1)", die echte Herstellernummer fehlte. `_merkmal_namen()` liest
+vorher aus, was die Kategorie anbietet; was es nicht gibt, ist eine
+**Meldung** im Bericht, keine Aufgabe für den Nutzer.
+
+**„Mehr anzeigen" muss vorher geklickt werden.** eBay zeigt nur die
+Pflichtmerkmale; dahinter liegt unter anderem `OE/OEM Referenznummer(n)` —
+das Feld, über das Käufer Kfz-Teile suchen.
+
+**Zum Zurücklesen die Stelle merken, solange das Feld noch leer ist.** Am
+echten Formular nachgemessen (2026-08-02) — die gefüllten Felder trugen
+`aria=''` mit dem Text `Audi`, `Sonnenblende`, `8K0857552`, nur die leeren
+noch ihren Namen:
 
 ```
 aria=''                 text='Audi'           <- Hersteller, gefüllt
@@ -226,10 +261,20 @@ aria=''                 text='8K0857552'      <- Herstellernummer, gefüllt
 
 Jeder Selektor über `aria-label` findet ein **ausgefülltes** Merkmal also
 grundsätzlich nicht mehr — beim Setzen greift er noch, beim Kontrollieren nie.
-Beschriftungen (`button.tooltip__host`) und Wertfelder
-(`button.se-expand-button__button`) stehen aber **in derselben Reihenfolge**;
-`_merkmal_wert()` paart sie deshalb über den Index. Exakter Namensvergleich
-zuerst, sonst greift „Hersteller" das Feld „Herstellernummer".
+
+Zwei Wege, die dafür naheliegen und beide **nicht** tragen:
+
+- *Beschriftung und Wertfeld über den Index paaren.* Trug bis zum
+  2026-08-09; seither haben auch Fotos, Titel, Preis und Lieferung
+  Aufklapp-Knöpfe. Gemessen: 5 Beschriftungen gegen 16 Wertfelder — die
+  Kontrolle las für „Hersteller" prompt „Foto-Optionen ansehen".
+- *Das Eingabefeld `search-box-attributes…` auslesen.* Das ist das Suchfeld
+  der Auswahlliste und bleibt auch nach dem Setzen **leer** (am gesetzten
+  „Audi" geprüft).
+
+Verlässlich ist allein die **Stelle in der Liste**, gemerkt zu dem Zeitpunkt,
+an dem das Feld noch leer war und seinen Namen trug. `_merkmal_setzen()`
+merkt sie sich und reicht sie an `_merkmal_wert()` durch.
 
 **Die Beschreibung ist beim Anlegen mit dem Titel vorbelegt.** Das versteckte
 `textarea[Beschreibung]` trägt zunächst den Angebotstitel, und der
@@ -273,14 +318,34 @@ und nach einer echten Bearbeitung steht dort eine andere Adresse.
 Hintergrund kann eBay das Teil nicht isolieren — dort bleibt der Hintergrund,
 egal wie oft man klickt. Das ist kein Fehler der Automation.
 
-**Anzeigentarif, Rücknahme, Versand**
+**Anzeigentarif, Rücknahme, Versand — Stand 2026-08-09**
 
-- Anzeigentarif: erst `div.promoted-listing-simple input[role=switch]`
-  einschalten, sonst existiert der Block nicht. Die Schnellauswahl kennt nur
-  8/10/12 % — für 2 % führt der Weg über `button.custom-rate-button-switch`.
-- Rücknahme und Versand sitzen hinter **Karten**, nicht hinter
-  Bearbeiten-Knöpfen: `button.se-field-card__body`. Im Dialog dann
-  `label.field__label` „Rücknahme im Inland" und „Fertig".
+Am 2026-08-09 hat eBay die untere Formularhälfte umgebaut. `se-field-card`
+und `div.promoted-listing-simple` gibt es **nicht mehr** (je null Treffer),
+Karten und Dialoge sind durch Felder direkt im Formular ersetzt:
+
+| | vorher | jetzt |
+|---|---|---|
+| Anzeigentarif | `div.promoted-listing-simple` + „Eigenen Anzeigentarif" | Schalter `input[role=switch][name='Basis auswählen']`, danach Feld `input[name='adRate']` |
+| Versandkosten | Knopf „Versandkosten bearbeiten" → Dialog | `input[name='domesticShippingPrice1']` direkt |
+| Auslandsversand | `isInternationalShippingOn` | `intlShippingServicePref` |
+| Rücknahme | Karte → Dialog → drei Felder | nur noch Anzeige: `div.returns-field-display__container` |
+
+Drei Dinge, die dabei Geld kosten:
+
+- **`adRate` steht auf 11 %**, sobald „Basis" eingeschaltet ist. Wer es nicht
+  überschreibt, zahlt das Fünfeinhalbfache der Vorgabe von 2 %. „Basis"
+  kostet pro Verkauf, „Premium" pro Klick — genommen wird Basis.
+- **Das Versandkostenfeld ist vorbelegt**, und zwar mit dem Preis des
+  *zuletzt eingestellten* Artikels (gemessen: 23,99 €). Wer es nicht
+  überschreibt, verkauft zum falschen Versandpreis, und man sieht es dem
+  Entwurf nicht an.
+- **Die Rücknahme merkt sich eBay am Konto** und zeigt sie nur noch an. Am
+  frisch angelegten Entwurf stand dort bereits „Akzeptiert innerhalb von
+  14 Tage / Käufer zahlt den Rückversand" und „Keine internationale
+  Rücknahme". `draft.py` **klickt hier nicht mehr, sondern prüft nur** — ein
+  Editor, den niemand ausgemessen hat, wäre geraten, und die Rücknahme ist
+  rechtlich bindend. Stimmt sie nicht, nennt der Bericht den Wortlaut.
 
 ## Warum jeder Schritt sein Ergebnis kontrolliert
 

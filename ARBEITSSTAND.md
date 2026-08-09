@@ -8,7 +8,7 @@ Hier steht deshalb, **wo die Arbeit gerade steht und was als Nächstes ansteht**
 der Stand geändert hat — erledigte Punkte streichen, neue Erkenntnisse eintragen.
 Dauerhaftes Wissen über das Projekt gehört dagegen nach `CLAUDE.md`, nicht hierher.
 
-Letzte Aktualisierung: 2026-08-08 (Preisbasis geschärft)
+Letzte Aktualisierung: 2026-08-09 (eBay-Formularumbau nachgezogen)
 
 ---
 
@@ -146,6 +146,53 @@ folgen daraus:
   echtes Gewicht. Sie war nie herausgefordert worden — siehe die offen
   gebliebenen Befunde A1, A2, A5, A7. Das bleibt der wichtigste ungeprüfte
   Teil des Programms.
+
+---
+
+## Stand 2026-08-09 — eBay hat das Formular umgebaut, nachgezogen
+
+Der erste Lauf unter `om.motors` (drei Teile vom Handy) scheiterte
+vollständig: kein einziger Entwurf. Ursache waren **zwei getrennte Umbauten**
+bei eBay, beide am selben Tag sichtbar geworden.
+
+**1. Der Einstieg** — zwei neue Zwischenseiten unter `/sl/prelist/identify`:
+Zustandsabfrage (`view=sellnode-condition`) und Produktbibliothek („Passendes
+Produkt finden"). Beide in `CLAUDE.md` beschrieben. Behoben.
+
+**2. Die untere Formularhälfte** — `se-field-card` und
+`div.promoted-listing-simple` gibt es nicht mehr. Anzeigentarif, Versand,
+Rücknahme und Auslandsversand liefen alle ins Leere; je Entwurf blieben
+sechs bis acht Handgriffe offen. Alles am **frisch angelegten** Entwurf neu
+ausgemessen, Tabelle in `CLAUDE.md`.
+
+**Dabei zwei Fehler gefunden, die schon vorher drin waren:**
+
+- `_merkmal_knopf()` suchte per Präfix. In „ECUs & Steuergeräte" gibt es kein
+  Merkmal „Hersteller" — also landete „Audi" in der **Herstellernummer** und
+  die Teilenummer gleich hinterher (`Audi (+1)`). `CLAUDE.md` warnt wörtlich
+  davor; die Regel stand aber nur in der Kontrolle, nicht in der Suche.
+- Die Schwelle fürs Bestimmungswort im Teilnamen lag bei 0,5 — mitten in der
+  Streuung der eBay-Treffer. Dasselbe Teil hieß am 07.08. „Abdeckung
+  Armaturenbrett" (Standard, 7,69 €) und am 09.08. „Armaturenbrett"
+  (**Spedition, 60,00 €**). Jetzt 0,3, wie beim Hauptwort.
+
+**Ergebnis:** Drei Entwürfe unter `om.motors`, alle mit **null offenen
+Handgriffen** (vorher sechs bis acht):
+
+| Teil | Preis | Versand | draftId |
+|---|---|---|---|
+| Steuergerät Feststellbremse `8K0907801J` | 22,90 € | Standard | `5210740187120` |
+| Lautsprecherabdeckung `8T1819635` | 27,90 € | Standard | `5209890938523` |
+| Abdeckung Armaturenbrett `8K0857085B` | 16,90 € | Standard | `5210983728121` |
+
+Die 31 Testentwürfe aus den Messläufen sind gelöscht; die drei eigenen
+Entwürfe des Nutzers (Nissan Micra, Audi A7, VW ID.4) blieben unangetastet.
+
+**Was das über die Selektoren sagt:** Sie sind der wartungsanfälligste Teil,
+und dieser Tag ist der Beleg. Zwei Umbauten an einem Tag, beide ohne
+Vorwarnung. Die Meldung „Verkaufsformular wurde nicht erreicht" nennt jetzt
+die Stelle, und Merkmale, die eine Kategorie gar nicht anbietet, stehen als
+Meldung im Bericht statt als Aufgabe.
 
 ---
 
@@ -803,11 +850,12 @@ ist alles gut; wird es umbenannt, müssen sie mitkopiert werden.
 
 **Zuerst — beides braucht einen echten Lauf, kein Nachdenken:**
 
-- [ ] **Erster Lauf unter `om.motors` beobachten.** Nicht wegen der Preise,
+- [x] ~~Erster Lauf unter `om.motors`~~ — gelaufen am 2026-08-09, siehe oben. Er scheiterte zunächst vollständig; die Veröffentlichungssperre kam dabei nie in die Nähe eines Auslösers, ist also weiterhin **unerprobt**.
+- [ ] **Erneut beobachten**, sobald wieder Fotos vom Handy kommen. Nicht wegen der Preise,
       sondern weil die Veröffentlichungssperre nie herausgefordert wurde. Ab
       jetzt steht ein Fehlklick im echten Konto.
-- [ ] **Die geschärfte Preisrechnung an einem echten Teil mit
-      Nachsatzbuchstaben prüfen.** Bisher nur an Berichtsdaten gerechnet.
+- [x] ~~Die geschärfte Preisrechnung an einem echten Teil mit
+      Nachsatzbuchstaben prüfen~~ — bestätigt am 2026-08-09: Steuergerät `8K0907801J` kam auf 22,90 € statt 24,90 €.
 
 **Danach, nach Nutzen sortiert:**
 
