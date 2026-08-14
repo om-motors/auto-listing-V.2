@@ -262,3 +262,17 @@ def nummer_lernen(gelesen: str, richtig: str, quelle: str = "ebay") -> None:
         log.info("gelernt: %s -> %s (%s)", g, r, quelle)
     except Exception as fehler:  # noqa: BLE001 — Lernen darf nie den Lauf kippen
         log.warning("Nummer %s -> %s nicht gelernt: %s", g, r, fehler)
+
+
+def auftrag_fotos_setzen(auftrag_id: str, pfade: List[str]) -> None:
+    """Die Fotoliste eines Auftrags auf die eigenen Bilder eingrenzen.
+
+    Gebraucht, wenn ein Upload mehrere Teile enthielt: Die uebrigen Gruppen
+    bekommen eigene Auftraege, und dieser hier darf ihre Bilder nicht
+    weiterfuehren - sonst zeigt TeilePilot an einem fertigen Entwurf die Fotos
+    aller Teile des Uploads.
+    """
+    _anfrage(
+        "/rest/v1/auftraege?id=eq.%s" % auftrag_id, methode="PATCH",
+        daten=json.dumps({"fotos": pfade}).encode("utf-8"),
+        kopfzeilen={"Content-Type": "application/json", "Prefer": "return=minimal"})

@@ -305,6 +305,20 @@ def _stufe_aus_text(text: str) -> Optional[str]:
     return None
 
 
+def _stufe_genau(wort: str) -> Optional[str]:
+    """Stufe nur, wenn das Wort GENAU so in der Stichwortliste steht.
+
+    Nötig, um die Kompositum-Regel abzusichern: `_stufe_aus_text` sucht
+    Teilzeichenketten und würde "türverkleidung" schon über "verkleidung"
+    treffen. Hier zählt allein der ausdrückliche Eintrag.
+    """
+    wort = (wort or "").lower()
+    for stufe, stichwoerter in VERSAND_STICHWOERTER:
+        if wort in stichwoerter:
+            return stufe
+    return None
+
+
 def versandstufe(teil: Optional[str], zusatztext: str = "") -> str:
     """Versandstufe über Stichwörter schätzen; im Zweifel die kleinste.
 
@@ -336,6 +350,30 @@ def versandstufe(teil: Optional[str], zusatztext: str = "") -> str:
     # also nicht mehr hochstufen; es entscheidet allein das Hüllwort.
     if erstes in HUELLWOERTER:
         return _stufe_aus_text(erstes) or "Standard"
+
+    # **Im deutschen Kompositum steht der Kopf am ENDE.** "Stoßstangen|halter"
+    # ist ein Halter, keine Stoßstange — genau wie "Halter Stoßfänger" eine
+    # Zeile höher. Die Regel darüber prüft aber auf Wortgleichheit und greift
+    # deshalb nur bei der getrennten Schreibweise.
+    #
+    # Am 2026-08-14 im Echtlauf: "Stoßstangenhalter 8T8807454A" bekam
+    # **Spedition (60 €)**, weil die Teilzeichenkette "stoßstange" traf. Bei
+    # 23,90 € Artikelpreis ist das Porto das Zweieinhalbfache der Ware.
+    #
+    # Nur echte Hüllwörter zählen als Kopf. "Stoßstangenträger" endet auf
+    # "träger", und der steht bewusst unter Spedition — ein Querträger ist
+    # gut einen Meter lang und bleibt sperrig.
+    #
+    # ⚠️ Und ein AUSDRÜCKLICHER Eintrag schlägt die Regel: "Türverkleidung"
+    # endet auf "verkleidung" (Mittel), steht aber selbst unter Spedition —
+    # eine Türverkleidung ist gut einen Meter lang. Ohne diese Reihenfolge
+    # stufte meine erste Fassung sie herunter.
+    genau = _stufe_genau(erstes)
+    if genau:
+        return genau
+    for huelle in HUELLWOERTER:
+        if len(erstes) > len(huelle) and erstes.endswith(huelle):
+            return _stufe_aus_text(huelle) or "Standard"
 
     aus_teil = _stufe_aus_text(erstes) or _stufe_aus_text(teil)
     if aus_teil:

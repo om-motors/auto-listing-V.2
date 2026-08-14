@@ -65,6 +65,23 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False, page=None) -> None
             fotos = gruppen[0]
             speicherpfade = [wo_liegt[str(p)] for p in fotos if str(p) in wo_liegt]
 
+            # ⚠️ Auch in der DATENBANK auf die eigene Gruppe eindampfen.
+            #
+            # Vorher wurden nur die lokalen Variablen verkleinert; die Zeile in
+            # `auftraege` behielt alle Fotos des Uploads. Der fertige Auftrag
+            # führte damit die Bilder ALLER Teile, und in TeilePilot sah es aus,
+            # als wären die Fotos falsch einsortiert.
+            #
+            # Am 2026-08-14 zweimal gemessen: Ein Upload mit 15 Fotos ergab
+            # einen fertigen "Stoßstangenhalter" mit allen 15 Bildern und
+            # daneben fünf Aufträge mit den Teilmengen. Der Nutzer sah beim
+            # Steuergerät ein einzelnes Bild, während seine übrigen beim
+            # Stoßstangenhalter lagen.
+            try:
+                cloud.auftrag_fotos_setzen(auftrag["id"], speicherpfade)
+            except Exception as fehler:  # noqa: BLE001 — darf den Lauf nicht kippen
+                log.warning("[%s] Fotoliste nicht eingegrenzt: %s", kennung, fehler)
+
         # Eine vom Handy eingetippte Teilenummer wird wie ein Ordnername
         # behandelt — `partnumber.aus_vorgabe()` erkennt selbst, ob das
         # überhaupt nach einer Nummer aussieht.
