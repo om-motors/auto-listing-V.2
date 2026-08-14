@@ -30,7 +30,8 @@ from typing import Dict, List, Optional
 
 from playwright.sync_api import sync_playwright
 
-from . import compose, config, draft, images, notify, research, vision
+from . import (cloud, compose, config, draft, images, notify, partnumber,
+               research, vision)
 
 log = logging.getLogger("autolister")
 
@@ -254,6 +255,24 @@ def _fotos_sortieren(photos: List[Path], vis: Dict) -> List[Path]:
     return kopf + vorne + hinten
 
 
+def _gelerntes_nachschlagen(kandidaten) -> Optional[str]:
+    """Wurde eine dieser Fehllesungen schon einmal berichtigt?
+
+    Die Kandidaten stehen nach Punkten sortiert; der bestbewertete Treffer
+    gewinnt. Kommt nichts zurueck — Tabelle leer, kein Netz, Cloud gar nicht
+    eingerichtet —, ist das kein Fehler, sondern der bisherige Zustand.
+    """
+    gelesene = [k.nummer for k in kandidaten]
+    karte = cloud.gelernte_nummern(gelesene)
+    if not karte:
+        return None
+    for k in kandidaten:
+        richtig = karte.get(cloud._normal(k.nummer))
+        if richtig:
+            return richtig
+    return None
+
+
 def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict:
     """Phase 2 für ein Produkt: Recherche, Entwurfsdaten, eBay-Entwurf."""
     vis = produkt.vision
@@ -267,20 +286,43 @@ def _process_with_browser(page, produkt: Produkt, dry_run: bool = False) -> Dict
         res = research.pruefe_kandidaten(page, kandidaten)
         gewinner = res.get("kandidat")
         if not res.get("geprueft"):
-            # Keine der gelesenen Nummern brachte auf eBay passende Treffer.
-            # Jetzt trotzdem einen Entwurf zu bauen hieße, ein Inserat mit
-            # falscher Teilenummer anzulegen — lieber ehrlich abbrechen und
-            # den Nutzer die richtige Nummer nennen lassen.
-            liste = ", ".join("%s (%.1f)" % (k.nummer, k.punkte)
-                              for k in kandidaten[:6])
-            raise vision.KeineTeilenummer(
-                "Keine der gelesenen Teilenummern ließ sich auf eBay "
-                "bestätigen. Gelesen wurde: %s. Bitte ein schärferes Foto der "
-                "Nummer ergänzen — oder den Ordner nach der richtigen Nummer "
-                "benennen, dann wird sie direkt verwendet." % liste)
-        if gewinner and gewinner.nummer != nr:
+            # Bevor aufgegeben wird: Ist diese Fehllesung schon einmal
+            # berichtigt worden? Dann steht die richtige Nummer in der
+            # geteilten Ablage, und derselbe Fehler kostet keinen zweiten
+            # Handgriff. Gefüllt wird sie aus TeilePilot ("Teilenummer
+            # nachtragen") und aus den eBay-Bestätigungen weiter unten.
+            gelernt = _gelerntes_nachschlagen(kandidaten)
+            vorgabe = partnumber.aus_vorgabe(gelernt) if gelernt else None
+            if vorgabe is None:
+                # Keine der gelesenen Nummern brachte auf eBay passende
+                # Treffer, und gelernt ist dazu nichts. Jetzt trotzdem einen
+                # Entwurf zu bauen hieße, ein Inserat mit falscher
+                # Teilenummer anzulegen — lieber ehrlich abbrechen.
+                liste = ", ".join("%s (%.1f)" % (k.nummer, k.punkte)
+                                  for k in kandidaten[:6])
+                raise vision.KeineTeilenummer(
+                    "Keine der gelesenen Teilenummern ließ sich auf eBay "
+                    "bestätigen. Gelesen wurde: %s. Bitte ein schärferes Foto "
+                    "der Nummer ergänzen — oder die Nummer in TeilePilot unter "
+                    "Einstellen nachtragen; sie wird dann direkt verwendet und "
+                    "für das nächste Mal gemerkt." % liste)
+
+            # Die Fehllesung ist bekannt und schon einmal berichtigt worden.
+            log.info("[%s] gelernte Nummer greift: %s -> %s",
+                     produkt.name, nr, vorgabe.nummer)
+            vis["teilenummer"] = vorgabe.formatiert
+            vis["teilenummer_kompakt"] = vorgabe.nummer
+            nr = vorgabe.nummer
+            produkt.work_dir = _umbenennen(produkt.work_dir, nr)
+            res = research.search_comparables(page, vis["teilenummer"], nr)
+        elif gewinner and gewinner.nummer != nr:
             log.info("[%s] eBay bestätigt Teilenummer: %s -> %s",
                      produkt.name, nr, gewinner.nummer)
+            # Dasselbe lernen, das ein Mensch beim Nachtragen beibringt — nur
+            # ohne Zutun: Diese Fehllesung stand für jene Nummer.
+            for k in kandidaten:
+                if k.nummer != gewinner.nummer:
+                    cloud.nummer_lernen(k.nummer, gewinner.nummer, quelle="ebay")
             vis["teilenummer"] = gewinner.formatiert
             vis["teilenummer_kompakt"] = gewinner.nummer
             vis["hersteller"] = gewinner.hersteller or vis.get("hersteller")

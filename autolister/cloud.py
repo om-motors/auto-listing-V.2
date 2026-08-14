@@ -197,3 +197,68 @@ def fotos_loeschen(pfade: List[str]) -> None:
                      % (BUCKET, urllib.parse.quote(pfad)), methode="DELETE")
         except Exception as fehler:  # noqa: BLE001 — Aufräumen darf nie den Lauf kippen
             log.warning("Foto %s konnte nicht gelöscht werden: %s", pfad, fehler)
+
+
+# ------------------------------------------------------------- Gelerntes ---
+
+# Was die Texterkennung liest -> was in Wahrheit richtig ist.
+#
+# Gefuellt wird die Tabelle von zwei Seiten: In TeilePilot traegt ein Mensch
+# die richtige Nummer nach, wenn ein Auftrag mangels lesbarer Nummer
+# gescheitert ist; und hier lernt der Mac aus jeder eBay-Bestaetigung, die
+# einen anderen Kandidaten als den erstgelesenen zum Sieger macht.
+#
+# Schema: siehe supabase/nummer-lernen.sql im Repo om-motors/autoteilewawi.
+
+
+def _normal(nummer: str) -> str:
+    """Grossbuchstaben, keine Trennzeichen — dieselbe Form wie in der App."""
+    return "".join(z for z in (nummer or "").upper() if z.isalnum())
+
+
+def gelernte_nummern(gelesene: List[str]) -> Dict[str, str]:
+    """Nachschlagen, wie diese Fehllesungen frueher berichtigt wurden.
+
+    Gibt {gelesen: richtig} zurueck — leer, wenn nichts bekannt ist. Ein
+    Fehler beim Nachschlagen darf den Lauf nicht kippen: Dann weiss der Mac
+    eben nichts und verhaelt sich wie bisher.
+    """
+    schluessel = [_normal(g) for g in gelesene if _normal(g)]
+    if not schluessel or not eingerichtet():
+        return {}
+    try:
+        liste = ",".join('"%s"' % s for s in sorted(set(schluessel)))
+        zeilen = _anfrage("/rest/v1/nummer_lernen?select=gelesen,richtig"
+                          "&gelesen=in.(%s)" % urllib.parse.quote(liste))
+        return {z["gelesen"]: z["richtig"] for z in (zeilen or [])}
+    except Exception as fehler:  # noqa: BLE001 — Nachschlagen ist Kuer, nicht Pflicht
+        log.warning("Gelernte Nummern nicht abrufbar: %s", fehler)
+        return {}
+
+
+def nummer_lernen(gelesen: str, richtig: str, quelle: str = "ebay") -> None:
+    """Eine Berichtigung merken.
+
+    ⚠️ Eine Zeile mit `quelle='mensch'` wird NICHT ueberschrieben. Wer das
+    Teil in der Hand hatte, hat recht; eine eBay-Vermutung darf das nicht
+    verdraengen. Umgesetzt ueber die Bedingung `quelle=eq.ebay` im PATCH —
+    trifft sie nicht zu, passiert schlicht nichts.
+    """
+    g, r = _normal(gelesen), _normal(richtig)
+    if not g or not r or g == r or not eingerichtet():
+        return
+    daten = json.dumps({"gelesen": g, "richtig": r, "quelle": quelle,
+                        "zuletzt": "now()"}).encode("utf-8")
+    try:
+        # on_conflict + merge-duplicates ist ein Upsert; die Bedingung, dass
+        # menschliche Zeilen stehen bleiben, prueft der zweite Aufruf.
+        vorhanden = _anfrage("/rest/v1/nummer_lernen?select=quelle&gelesen=eq.%s"
+                             % urllib.parse.quote(g))
+        if vorhanden and vorhanden[0].get("quelle") == "mensch":
+            return
+        _anfrage("/rest/v1/nummer_lernen", methode="POST", daten=daten,
+                 kopfzeilen={"Content-Type": "application/json",
+                             "Prefer": "resolution=merge-duplicates,return=minimal"})
+        log.info("gelernt: %s -> %s (%s)", g, r, quelle)
+    except Exception as fehler:  # noqa: BLE001 — Lernen darf nie den Lauf kippen
+        log.warning("Nummer %s -> %s nicht gelernt: %s", g, r, fehler)
