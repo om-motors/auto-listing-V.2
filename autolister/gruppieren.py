@@ -101,11 +101,38 @@ def nach_teilenummer(fotos: List[Path]) -> Optional[List[List[Path]]]:
         log.warning("Gruppierung über Teilenummern nicht möglich: %s", fehler)
         return None
 
-    # Je Foto die beste Teilenummer bestimmen
+    # Je Foto die beste Teilenummer bestimmen — und die übrigen Lesarten
+    # aufheben, siehe die Zusammenführung weiter unten.
     nummern: List[Optional[str]] = []
+    lesarten: List[set] = []
     for texte in je_foto:
         kandidaten = partnumber.finde_kandidaten(texte) if texte else []
         nummern.append(kandidaten[0].nummer if kandidaten else None)
+        lesarten.append({k.nummer for k in kandidaten[:6]})
+
+    # **Ein Lesefehler darf kein zweites Teil erfinden.**
+    #
+    # Am 2026-08-14 zerriss eine Sonnenblende in zwei Inserate: Auf einem Foto
+    # las die Texterkennung eine andere Nummer als auf den beiden anderen, und
+    # weil die Gruppen nach Nummer geschlüsselt sind, wurden daraus zwei Teile.
+    # Dass eBay später beide auf `8K0857551` berichtigte, kam zu spät — die
+    # Trennung war da längst passiert, und es entstanden zwei Entwürfe für ein
+    # Teil. Genau davor warnt der Nutzer seit Wochen.
+    #
+    # Die Rettung steckt schon in `partnumber`: Es liefert nicht eine Nummer,
+    # sondern alle plausiblen Lesarten. Überschneiden sich die Lesarten zweier
+    # aufeinanderfolgender Anker, ist es dasselbe Teil — dann gewinnt die
+    # Nummer des ERSTEN Ankers, und beide Fotos bleiben zusammen.
+    for i in range(len(nummern)):
+        if not nummern[i]:
+            continue
+        vorher = next((j for j in range(i - 1, -1, -1) if nummern[j]), None)
+        if vorher is None:
+            continue
+        if nummern[i] != nummern[vorher] and (lesarten[i] & lesarten[vorher]):
+            log.info("Gruppierung: %s und %s sind dieselbe Lesart — zusammengelegt",
+                     nummern[vorher], nummern[i])
+            nummern[i] = nummern[vorher]
 
     verschiedene = {n for n in nummern if n}
     if len(verschiedene) < 2:
