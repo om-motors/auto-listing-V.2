@@ -183,7 +183,21 @@ def _pruefe_mercedes(m: re.Match) -> List[Tuple[str, str]]:
 
 def _pruefe_audi(m: re.Match) -> List[Tuple[str, str]]:
     typ, haupt, unter, suffix = m.groups()
-    typen = _varianten(typ, "zbz")          # z.B. "SK0" -> "5K0", "8K0"
+    # ⚠️ Der Typcode hat DREI Muster, nicht eines. Bis zum 14.08.2026 stand
+    # hier nur "zbz" (8K0, 4H0, 3G0) — damit waren zwei ganze Familien
+    # unerreichbar:
+    #
+    #   zbb   1EA, 5NA   (neuere VW/Audi)
+    #   zzb   80A, 11A, 83A
+    #
+    # Eine Nummer aus diesen Familien konnte in der Kandidatenliste gar nicht
+    # vorkommen, egal wie gut das Foto war. Der Fehlschlag sah dann aus wie
+    # ein Leseproblem und war keines.
+    typen = []
+    for muster in ("zbz", "zbb", "zzb"):    # z.B. "SK0" -> "5K0", "8K0"
+        for v in _varianten(typ, muster):
+            if v not in typen:
+                typen.append(v)
     hauptgruppen = _varianten(haupt, "zzz")
     untergruppen = _varianten(unter, "zzz")
     if not (typen and hauptgruppen and untergruppen):
