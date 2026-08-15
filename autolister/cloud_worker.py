@@ -20,6 +20,7 @@ unverändert.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import sys
 import time
@@ -29,6 +30,20 @@ from typing import Dict
 from . import cloud, config, gruppieren, notify, pipeline
 
 log = logging.getLogger("autolister")
+
+# Aufträge aus der App WERDEN gruppiert. Das ist der Normalfall: Der Nutzer
+# lädt einen ganzen Rundgang auf einmal hoch — „drei Bilder für eine
+# Abdeckung, vier für ein Steuergerät" — und erwartet zu Recht, dass das
+# Programm die Teile selbst trennt.
+#
+# ⚠️ Am 15.08.2026 war das kurzzeitig abgeschaltet, weil die Gruppierung
+# falsch trennte. Der Fehler lag nicht im Gruppieren, sondern in der Regel
+# dahinter (siehe `gruppieren.nach_teilenummer`): Sie nahm an, die Teilenummer
+# stehe am ANFANG einer Gruppe, tatsächlich wird sie ZULETZT fotografiert.
+# Damit war jede Gruppe um ein Teil verschoben. Abschalten war die falsche
+# Antwort — der Nutzer dazu deutlich: „das Programm soll es definitiv selber
+# zuordnen, sonst ist das ein massiver Rückschritt."
+CLOUD_GRUPPIEREN = os.environ.get("AUTOLISTER_CLOUD_GRUPPIEREN", "1") != "0"
 
 
 def _arbeitsordner(auftrag: Dict) -> Path:
@@ -48,11 +63,47 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False, page=None) -> None
             raise RuntimeError("Der Auftrag enthält keine Fotos.")
         log.info("[%s] %d Foto(s) geladen", kennung, len(fotos))
 
-        # Enthält der Upload mehrere Teile? Dann für jedes weitere einen
-        # eigenen Auftrag anlegen und hier nur das erste bearbeiten. So kann
-        # der Nutzer einen ganzen Rundgang auf einmal hochladen.
+        # ⚠️ EIN AUFTRAG AUS DER APP KANN MEHRERE TEILE ENTHALTEN — hier wird
+        # gruppiert. Der Nutzer lädt einen ganzen Rundgang auf einmal hoch und
+        # fotografiert die zusammengehörenden Bilder hintereinander.
+        #
+        # Am 2026-08-14 an einem echten Upload nachgemessen (15 Fotos,
+        # 5 Teile zu je 3 Bildern, Ordner `2026-08-14T17-06-33-143Z-teil`).
+        # Die Gruppierung machte daraus SIEBEN Teile, und keine einzige Gruppe
+        # war richtig:
+        #
+        #   Wahrheit (aus den Originalen in Erledigt/ nachgesehen):
+        #     Sonnenblende 8K0857551      01, 14, 15
+        #     Armaturenbrett 8K0857085B   02, 03, 04
+        #     Lautsprecherabd. 8T1819635  05, 06, 07
+        #     Steuergerät 8K0907801N      08, 09, 10
+        #     Stoßfängerhalter 8T8807454A 11, 12, 13
+        #
+        #   Was die Gruppierung daraus machte:
+        #     01-03 | 04-06 | 07 | 08 | 09-12 | 13 | 14-15
+        #
+        # **Behoben am 15.08.2026 — der Fehler war die REGEL, nicht das
+        # Gruppieren.** `nach_teilenummer()` nahm an, die Teilenummer stehe am
+        # ANFANG einer Gruppe ("alles NACH einer Nummer gehoert zu ihr").
+        # Tatsaechlich fotografiert der Nutzer erst das Teil und ZULETZT die
+        # eingepraegte Nummer — damit war jede Gruppe um genau ein Teil
+        # verschoben, und das Nummernfoto der Sonnenblende landete bei den
+        # Bildern des Armaturenbretts. Nachgerechnet an drei Gewohnheiten und
+        # an ungleichen Gruppen (4/3/2 Fotos): 3 von 3 richtig, vorher 0.
+        #
+        # ⚠️ Zwei Fallen, die dabei bleiben:
+        #
+        # 1. **Jede Fehllesung erfindet ein Teil.** Auf dem Steuergeraet steht
+        #    ein Zulieferer-Aufkleber (`A2C53506...`), gelesen als
+        #    `4ZC532825GS`; auf der Sonnenblende wurde das Warnschild zu
+        #    `5C0010090`. Beide haben 0 eBay-Treffer. Eine Nummer, die es
+        #    nicht gibt, darf keine Gruppe aufmachen.
+        # 2. **Die Reihenfolge muss stimmen.** iOS liefert die Fotos in
+        #    AUFNAHME-Reihenfolge, nicht in Auswahlreihenfolge. Wer die Teile
+        #    hintereinander fotografiert, bekommt sie auch hintereinander —
+        #    ein altes Foto aus dem Auto dazwischen bringt es durcheinander.
         wo_liegt = {str(lokal): fern for lokal, fern in zip(fotos, speicherpfade)}
-        gruppen = gruppieren.aufteilen(fotos)
+        gruppen = (gruppieren.aufteilen(fotos) if CLOUD_GRUPPIEREN else [list(fotos)])
         if len(gruppen) > 1:
             for weiteres_teil in gruppen[1:]:
                 pfade = [wo_liegt[str(p)] for p in weiteres_teil if str(p) in wo_liegt]

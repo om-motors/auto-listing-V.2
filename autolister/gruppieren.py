@@ -138,40 +138,113 @@ def nach_teilenummer(fotos: List[Path]) -> Optional[List[List[Path]]]:
     if len(verschiedene) < 2:
         return None                      # ein Teil (oder gar keine Nummer)
 
-    # Ankerpunkte: Stellen, an denen eine neue Nummer auftaucht
-    anker = [(i, n) for i, n in enumerate(nummern) if n]
-    gruppen_von_nummer: dict = {}
-    for _, nummer in anker:
-        gruppen_von_nummer.setdefault(nummer, [])
-
-    # **Alles nach einer Teilenummer gehört zu diesem Teil, bis die nächste
-    # Nummer auftaucht.** Fotos vor der allerersten Nummer gehören zum ersten
-    # Teil — davor gibt es ja nichts anderes.
-    #
-    # Vorher wurde der *nächstgelegene* Anker genommen, egal ob davor oder
-    # dahinter. Das ging am 2026-08-07 daneben: Ein Foto der
-    # Lautsprecherabdeckung lag ein Bild vor der Armaturenbrett-Nummer und
-    # zwei hinter der eigenen — es landete im falschen Inserat, und zwar als
-    # Hauptfoto. An den neun Fotos jenes Uploads nachgerechnet: die
-    # Rückwärtsregel trifft 9 von 9, das Abstandsverfahren 8 von 9.
-    for i, foto in enumerate(fotos):
-        if nummern[i]:
-            gruppen_von_nummer[nummern[i]].append(foto)
+    # ------------------------------------------------------------------
+    # Ankerbloecke: aufeinanderfolgende Fotos mit DERSELBEN Nummer sind ein
+    # Block. Die Zahl der Bloecke ist die Zahl der Teile — der Nutzer legt
+    # in jede Gruppe genau ein Bild, auf dem die Nummer zu erkennen ist.
+    bloecke: List[dict] = []
+    for i, n in enumerate(nummern):
+        if not n:
             continue
-        davor = [a for a in anker if a[0] < i]
-        zustaendig = davor[-1][1] if davor else anker[0][1]
-        gruppen_von_nummer[zustaendig].append(foto)
+        if bloecke and bloecke[-1]["nummer"] == n and all(
+                not nummern[j] for j in range(bloecke[-1]["ende"] + 1, i)):
+            bloecke[-1]["ende"] = i
+        else:
+            bloecke.append({"nummer": n, "start": i, "ende": i})
 
-    # Reihenfolge der Gruppen: wie sie zuerst auftauchen
-    reihenfolge = []
-    for _, nummer in anker:
-        if nummer not in reihenfolge:
-            reihenfolge.append(nummer)
-    gruppen = [gruppen_von_nummer[n] for n in reihenfolge]
+    if len(bloecke) < 2:
+        return None
+
+    # ------------------------------------------------------------------
+    # WO wird geschnitten?
+    #
+    # Die alte Regel lautete „alles nach einer Nummer gehoert zu ihr, bis die
+    # naechste kommt". Sie setzt voraus, dass die Nummer am ANFANG einer
+    # Gruppe steht. Tatsaechlich fotografiert der Nutzer die Nummer meist als
+    # LETZTES — damit war jede Gruppe um genau ein Teil verschoben. Am
+    # 2026-08-14 an 15 Fotos von 5 Teilen gemessen: sieben Gruppen, keine
+    # einzige richtig; das Nummernfoto der Sonnenblende lag bei den Bildern
+    # des Armaturenbretts.
+    #
+    # Eine feste Richtung ist also falsch, egal welche. Sicher ist nur: In
+    # jedem Zwischenraum zwischen zwei Ankerbloecken liegt GENAU EINE Grenze.
+    # Wo genau, entscheidet das Bild — beim Teilewechsel aendert sich der
+    # ganze Bildinhalt, innerhalb eines Teils nur der Blickwinkel.
+    #
+    # ⚠️ Bildaehnlichkeit als Schiedsrichter ist GEMESSEN UNBRAUCHBAR und
+    # deshalb nicht eingebaut. An 13 echten Fotos nachgerechnet: Zwei Bilder
+    # desselben Teils erreichten Abstand 0,67, ein echter Teilewechsel nur
+    # 0,31 — Nahaufnahme und Uebersichtsfoto desselben Teils sehen sich
+    # weniger aehnlich als zwei verschiedene schwarze Kunststoffteile auf
+    # demselben Tisch. Als Entscheider zwischen drei Kandidaten traf es 1 von
+    # 4. Wer es erneut versuchen will: erst Vordergrund freistellen und
+    # Silhouetten vergleichen, Farbe und Grobraster reichen nicht.
+    #
+    # Verlaesslich ist stattdessen die GEWOHNHEIT: Der Nutzer fotografiert
+    # erst das Teil und zuletzt die eingepraegte Nummer. Dann faellt die
+    # Grenze genau auf den Anker. `NUMMER_ZULETZT=0` dreht es um, wenn jemand
+    # andersherum arbeitet; ohne Festlegung bleibt die Mitte, die bei beiden
+    # Gewohnheiten nur halb danebenliegt statt ganz.
+    wo = os.environ.get("AUTOLISTER_NUMMER_POSITION", "ende").strip().lower()
+    grenzen: List[int] = []
+    for a, b in zip(bloecke, bloecke[1:]):
+        kandidaten = list(range(a["ende"], b["start"]))
+        if not kandidaten:
+            grenzen.append(a["ende"])
+        elif wo == "ende":
+            grenzen.append(kandidaten[0])         # Nummer schliesst die Gruppe ab
+        elif wo == "anfang":
+            grenzen.append(kandidaten[-1])        # Nummer eroeffnet die naechste
+        else:
+            grenzen.append(kandidaten[len(kandidaten) // 2])
+
+    gruppen: List[List[Path]] = []
+    start = 0
+    for g in grenzen:
+        gruppen.append(list(fotos[start:g + 1]))
+        start = g + 1
+    gruppen.append(list(fotos[start:]))
+    gruppen = [g for g in gruppen if g]
 
     log.info("Gruppierung über Teilenummern: %d Fotos -> %d Teile (%s)",
-             len(fotos), len(gruppen), ", ".join(reihenfolge))
+             len(fotos), len(gruppen), ", ".join(b["nummer"] for b in bloecke))
     return gruppen
+
+
+def _bildmerkmale(pfad: Path):
+    """Farbhistogramm und Grobraster eines Fotos. None, wenn unlesbar."""
+    try:
+        from PIL import Image
+    except ImportError:                      # ohne Pillow bleibt die Mitte
+        return None
+    try:
+        with Image.open(pfad) as im:
+            klein = im.convert("RGB").resize((48, 48))
+    except Exception:                        # noqa: BLE001 - unlesbar ist unlesbar
+        return None
+    pixel = list(klein.getdata())
+    hist = [0.0] * 216
+    raster = [0.0] * 36
+    zaehler = [0] * 36
+    for idx, (r, g, b) in enumerate(pixel):
+        hist[(r * 6 // 256) * 36 + (g * 6 // 256) * 6 + (b * 6 // 256)] += 1
+        zelle = ((idx // 48) * 6 // 48) * 6 + ((idx % 48) * 6 // 48)
+        raster[zelle] += 0.299 * r + 0.587 * g + 0.114 * b
+        zaehler[zelle] += 1
+    n = float(len(pixel))
+    hist = [h / n for h in hist]
+    raster = [raster[i] / zaehler[i] / 255.0 for i in range(36)]
+    return hist, raster
+
+
+def _bildbruch(a: Path, b: Path) -> float:
+    """0 = dasselbe Bild, 1 = voellig verschieden. Negativ = nicht messbar."""
+    ma, mb = _bildmerkmale(a), _bildmerkmale(b)
+    if not ma or not mb:
+        return -1.0
+    ueberlapp = sum(min(x, y) for x, y in zip(ma[0], mb[0]))
+    rasterabstand = sum(abs(x - y) for x, y in zip(ma[1], mb[1])) / 36.0
+    return 0.7 * (1.0 - ueberlapp) + 0.3 * min(1.0, rasterabstand * 3.0)
 
 
 def aufteilen(fotos: List[Path]) -> List[List[Path]]:
