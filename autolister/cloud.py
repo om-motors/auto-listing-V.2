@@ -133,13 +133,21 @@ def auftrag_atomar_aufteilen(auftrag_id: str, gruppen: List[List[str]]) -> None:
          "fotos": fotos}
         for i, fotos in enumerate(gruppen[1:], start=1)
     ]
-    _anfrage(
-        "/rest/v1/rpc/auftrag_atomar_aufteilen", methode="POST",
+    argumente = dict(
+        pfad="/rest/v1/rpc/auftrag_atomar_aufteilen", methode="POST",
         daten=json.dumps({"p_auftrag_id": str(auftrag_id),
                           "p_eltern_fotos": gruppen[0],
                           "p_kinder": kinder}).encode("utf-8"),
         kopfzeilen={"Content-Type": "application/json",
                     "Prefer": "return=minimal"})
+    try:
+        _anfrage(**argumente)
+    except (urllib.error.URLError, TimeoutError):
+        # Die Antwort kann nach einem erfolgreichen Commit verloren gehen.
+        # Ein zweiter identischer Aufruf ist wegen der deterministischen IDs
+        # und ON CONFLICT sicher und verhindert einen falschen Fehlerstatus.
+        log.warning("Antwort auf atomare Aufteilung verloren — einmaliger Retry")
+        _anfrage(**argumente)
 
 
 def haengende_freigeben() -> int:

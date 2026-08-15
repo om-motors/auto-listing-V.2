@@ -7,6 +7,7 @@ darf deshalb eine Gruppe schliessen.
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+import urllib.error
 
 from autolister import cloud, cloud_worker, gruppieren, partnumber, research
 
@@ -53,6 +54,16 @@ class GruppierungApp(unittest.TestCase):
         gruppen = gruppieren.fuer_app(self.fotos, self.bestaetige)
 
         self.assertEqual(gruppen, [self.fotos[:3], self.fotos[3:]])
+
+    @patch("autolister.gruppieren.ocr.lies_fotos_einzeln")
+    def test_zwei_getrennte_produkte_mit_gleicher_nummer_bleiben_zwei(self, lesen):
+        fotos = [Path(f"{i:02}.jpg") for i in range(1, 7)]
+        lesen.return_value = ocr_funde(
+            None, None, "8K0857551", None, None, "8K0857551")
+
+        gruppen = gruppieren.fuer_app(fotos, self.bestaetige)
+
+        self.assertEqual(gruppen, [fotos[:3], fotos[3:]])
 
     @patch("autolister.gruppieren.ocr.lies_fotos_einzeln")
     def test_fotos_hinter_letzter_nummer_stoppen_den_auftrag(self, lesen):
@@ -146,11 +157,22 @@ class CloudAufteilung(unittest.TestCase):
         cloud.auftrag_atomar_aufteilen(auftrag_id, gruppen)
 
         self.assertEqual(anfrage.call_count, 1)
-        pfad, = anfrage.call_args.args
+        pfad = anfrage.call_args.kwargs["pfad"]
         self.assertEqual(pfad, "/rest/v1/rpc/auftrag_atomar_aufteilen")
         daten = __import__("json").loads(anfrage.call_args.kwargs["daten"])
         self.assertEqual(daten["p_eltern_fotos"], gruppen[0])
         self.assertEqual([k["fotos"] for k in daten["p_kinder"]], gruppen[1:])
+
+    @patch("autolister.cloud._anfrage")
+    def test_verlorene_antwort_wird_genau_einmal_wiederholt(self, anfrage):
+        anfrage.side_effect = [urllib.error.URLError("timeout"), None]
+
+        cloud.auftrag_atomar_aufteilen(
+            "12345678-1234-5678-1234-567812345678", [["1.jpg"], ["2.jpg"]])
+
+        self.assertEqual(anfrage.call_count, 2)
+        self.assertEqual(anfrage.call_args_list[0].kwargs,
+                         anfrage.call_args_list[1].kwargs)
 
 if __name__ == "__main__":
     unittest.main()

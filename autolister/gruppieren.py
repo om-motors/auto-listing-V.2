@@ -79,7 +79,7 @@ def fuer_app(fotos: List[Path], kandidat_bestaetigen) -> List[List[Path]]:
             # danach nochmals auf der gewollten Nahaufnahme lesbar sein. Der
             # letzte Fund ist der Abschluss; daraus duerfen nie zwei Produkte
             # und damit zwei Entwuerfe entstehen.
-            if anker and anker[-1][1] == nummer:
+            if anker and anker[-1][1] == nummer and anker[-1][0] == i - 1:
                 anker[-1] = (i, nummer)
             else:
                 anker.append((i, nummer))
