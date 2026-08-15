@@ -149,6 +149,24 @@ Berichte gegenprüfen, statt zu raten.
   Ungefiltert wurde daraus einmal der Teilname „Geöffnet" — entfernt in
   `research._clean_title()`.
 
+## Gruppierung von App-Fotos (Stand 15.08.2026)
+
+Fuer gemeinsame Uploads aus TeilePilot gilt ein fester Aufnahmevertrag:
+Produktbilder zusammenhaengend, die eingestanzte Teilenummer immer zuletzt.
+iOS liefert die Aufnahme- und nicht verlaesslich die Auswahlreihenfolge;
+deshalb muss auch in dieser Reihenfolge fotografiert werden.
+
+`gruppieren.fuer_app()` behandelt ein ueber eBay bestaetigtes Nummernbild als
+Abschluss der aktuellen Gruppe. `research.bestaetige_kandidaten()` akzeptiert
+eine OCR-Lesart nur, wenn sie exakt in mindestens einem eBay-Titel vorkommt.
+Beliebige Suchtreffer reichen nicht. Dadurch duerfen Fehllesungen von
+Zuliefereraufklebern und Warnschildern keine Gruppe mehr erfinden.
+
+Die Gruppierung arbeitet fail-closed: Keine bestaetigte Nummer oder Fotos
+hinter dem letzten bestaetigten Nummernbild bedeuten `GruppierungUnsicher`;
+der Auftrag landet als Fehler in TeilePilot und erzeugt keinen Entwurf. Diese
+Sperre nicht in einen stillen Rueckfall auf „alles ein Teil" verwandeln.
+
 ## Datenschutzsperre von macOS
 
 Liegt das Projekt in `~/Desktop`, `~/Documents` oder `~/Downloads`, bekommen

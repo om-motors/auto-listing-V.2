@@ -36,6 +36,61 @@ from . import ocr
 
 log = logging.getLogger("autolister")
 
+
+class GruppierungUnsicher(RuntimeError):
+    """Der App-Auftrag darf noch keinen eBay-Entwurf erzeugen."""
+
+
+def fuer_app(fotos: List[Path], kandidat_bestaetigen) -> List[List[Path]]:
+    """App-Fotos ueber bestaetigte Nummernbilder sicher gruppieren.
+
+    Vertrag mit dem Mitarbeiter: Die Fotos eines Produkts werden
+    hintereinander aufgenommen, die Teilenummer kommt immer zuletzt. Eine
+    Nummer darf die Gruppe nur schliessen, wenn `kandidat_bestaetigen` sie
+    gegen eBay bestaetigt. Damit erfinden Zuliefereraufkleber und Warnschilder
+    keine zusaetzlichen Produkte.
+
+    Der Auftrag wird fail-closed behandelt: Ohne bestaetigte Nummer oder mit
+    Fotos hinter dem letzten Nummernbild entsteht kein Entwurf.
+    """
+    from . import partnumber
+
+    if not fotos:
+        raise GruppierungUnsicher("Der Auftrag enthält keine Fotos.")
+    try:
+        je_foto = ocr.lies_fotos_einzeln(fotos, gruendlich=False)
+    except Exception as fehler:  # noqa: BLE001 - wird als Auftragsfehler gezeigt
+        raise GruppierungUnsicher(
+            "Die Nummernbilder konnten nicht gelesen werden: %s" % fehler) from fehler
+
+    abschluesse: List[int] = []
+    cache = {}
+    for i, texte in enumerate(je_foto):
+        kandidaten = partnumber.finde_kandidaten(texte) if texte else []
+        if not kandidaten:
+            continue
+        schluessel = tuple(k.nummer for k in kandidaten)
+        if schluessel not in cache:
+            cache[schluessel] = kandidat_bestaetigen(kandidaten)
+        if cache[schluessel]:
+            abschluesse.append(i)
+
+    if not abschluesse:
+        raise GruppierungUnsicher(
+            "Gruppierung unsicher: keine bestätigte Teilenummer gefunden. "
+            "Bitte jedes Produkt mit dem Nummernbild abschließen.")
+    if abschluesse[-1] != len(fotos) - 1:
+        raise GruppierungUnsicher(
+            "Gruppierung unsicher: Nach der letzten bestätigten Teilenummer "
+            "liegen noch Fotos. Bitte das Nummernbild jedes Produkts zuletzt fotografieren.")
+
+    gruppen: List[List[Path]] = []
+    start = 0
+    for ende in abschluesse:
+        gruppen.append(list(fotos[start:ende + 1]))
+        start = ende + 1
+    return gruppen
+
 # Ab dieser Pause gilt das nächste Foto als neues Teil. 90 s ist bewusst
 # großzügig: lieber zwei Teile versehentlich zusammen (fällt beim Gegenlesen
 # sofort auf) als ein Teil zerrissen, denn dann entstehen zwei halbe Inserate.

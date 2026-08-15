@@ -27,33 +27,23 @@ import time
 from pathlib import Path
 from typing import Dict
 
-from . import cloud, config, gruppieren, notify, pipeline
+from . import cloud, config, gruppieren, notify, pipeline, research
 
 log = logging.getLogger("autolister")
 
-# Aufträge aus der App werden NICHT gruppiert: ein Auftrag ist ein Teil.
-#
-# Der Nutzer wählt in TeilePilot die Fotos eines Teils aus und reiht sie als
-# eigenen Auftrag ein („+ Teil hinzufügen"). Diese Auswahl ist WISSEN; die
-# Gruppierung über Teilenummern ist eine SCHÄTZUNG.
-#
-# ⚠️ Die Geschichte dazu, damit sie niemand noch einmal durchläuft:
-#
-#   14.08.  Gruppierung an. 15 Fotos von 5 Teilen wurden zu 7 Aufträgen,
-#           keine Gruppe richtig. Abgeschaltet.
-#   15.08.  Nutzer widerspricht — das Programm soll es selbst können.
-#           Regelfehler gefunden (die Nummer schliesst eine Gruppe ab, sie
-#           eröffnet sie nicht) und behoben, Gruppierung wieder an.
-#   15.08.  Nutzer testet erneut: „du kriegst es einfach nicht hin. mach es
-#           einfach wieder so wie vorher, dass ich die Teile einzeln
-#           hochladen muss." Also wieder aus.
-#
-# Die reparierte Regel in `gruppieren.nach_teilenummer()` BLEIBT und ist
-# nachweislich besser als die alte — sie greift weiterhin für den
-# Ordner-Watcher (`Eingang/`). Sie reicht im Betrieb nur nicht aus. Wer sie
-# erneut für die App einschalten will: `AUTOLISTER_CLOUD_GRUPPIEREN=1`, und
-# vorher die offenen Punkte in UEBERGABE.md lesen.
-CLOUD_GRUPPIEREN = os.environ.get("AUTOLISTER_CLOUD_GRUPPIEREN", "") == "1"
+# App-Vertrag ab 15.08.2026: Produktbilder zusammenhaengend fotografieren,
+# die Teilenummer immer zuletzt. Eine OCR-Lesart wird erst zur Gruppengrenze,
+# nachdem eBay sie in einem echten Angebotstitel bestaetigt hat. Der alte
+# Schalter und das ungepruefte Sofort-Gruppieren bleiben bewusst entfernt:
+# Fehllesungen auf Warnschildern hatten daraus falsche Entwuerfe gemacht.
+
+
+def _app_gruppen(page, fotos):
+    if page is None:
+        raise gruppieren.GruppierungUnsicher(
+            "Die Foto-Gruppierung braucht die eBay-Prüfung im Browser.")
+    return gruppieren.fuer_app(
+        fotos, lambda kandidaten: research.bestaetige_kandidaten(page, kandidaten))
 
 
 def _arbeitsordner(auftrag: Dict) -> Path:
@@ -73,47 +63,18 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False, page=None) -> None
             raise RuntimeError("Der Auftrag enthält keine Fotos.")
         log.info("[%s] %d Foto(s) geladen", kennung, len(fotos))
 
-        # ⚠️ EIN AUFTRAG AUS DER APP KANN MEHRERE TEILE ENTHALTEN — hier wird
-        # gruppiert. Der Nutzer lädt einen ganzen Rundgang auf einmal hoch und
-        # fotografiert die zusammengehörenden Bilder hintereinander.
+        # Ein App-Auftrag darf mehrere Teile enthalten. Der Mitarbeiter nimmt
+        # die Produktbilder zusammenhaengend auf und fotografiert die Nummer
+        # jeweils zuletzt. `fuer_app()` laesst nur Nummern als Abschluss zu,
+        # die eBay exakt in einem Angebotstitel bestaetigt. Die frueheren
+        # Fehllesungen `4ZC532825GS` und `5C0010090` liefern null passende
+        # Titel und koennen daher kein zweites Teil mehr erfinden.
         #
-        # Am 2026-08-14 an einem echten Upload nachgemessen (15 Fotos,
-        # 5 Teile zu je 3 Bildern, Ordner `2026-08-14T17-06-33-143Z-teil`).
-        # Die Gruppierung machte daraus SIEBEN Teile, und keine einzige Gruppe
-        # war richtig:
-        #
-        #   Wahrheit (aus den Originalen in Erledigt/ nachgesehen):
-        #     Sonnenblende 8K0857551      01, 14, 15
-        #     Armaturenbrett 8K0857085B   02, 03, 04
-        #     Lautsprecherabd. 8T1819635  05, 06, 07
-        #     Steuergerät 8K0907801N      08, 09, 10
-        #     Stoßfängerhalter 8T8807454A 11, 12, 13
-        #
-        #   Was die Gruppierung daraus machte:
-        #     01-03 | 04-06 | 07 | 08 | 09-12 | 13 | 14-15
-        #
-        # **Behoben am 15.08.2026 — der Fehler war die REGEL, nicht das
-        # Gruppieren.** `nach_teilenummer()` nahm an, die Teilenummer stehe am
-        # ANFANG einer Gruppe ("alles NACH einer Nummer gehoert zu ihr").
-        # Tatsaechlich fotografiert der Nutzer erst das Teil und ZULETZT die
-        # eingepraegte Nummer — damit war jede Gruppe um genau ein Teil
-        # verschoben, und das Nummernfoto der Sonnenblende landete bei den
-        # Bildern des Armaturenbretts. Nachgerechnet an drei Gewohnheiten und
-        # an ungleichen Gruppen (4/3/2 Fotos): 3 von 3 richtig, vorher 0.
-        #
-        # ⚠️ Zwei Fallen, die dabei bleiben:
-        #
-        # 1. **Jede Fehllesung erfindet ein Teil.** Auf dem Steuergeraet steht
-        #    ein Zulieferer-Aufkleber (`A2C53506...`), gelesen als
-        #    `4ZC532825GS`; auf der Sonnenblende wurde das Warnschild zu
-        #    `5C0010090`. Beide haben 0 eBay-Treffer. Eine Nummer, die es
-        #    nicht gibt, darf keine Gruppe aufmachen.
-        # 2. **Die Reihenfolge muss stimmen.** iOS liefert die Fotos in
-        #    AUFNAHME-Reihenfolge, nicht in Auswahlreihenfolge. Wer die Teile
-        #    hintereinander fotografiert, bekommt sie auch hintereinander —
-        #    ein altes Foto aus dem Auto dazwischen bringt es durcheinander.
+        # iOS liefert Aufnahme-, nicht Auswahlreihenfolge. Deshalb ist diese
+        # Aufnahmegewohnheit Teil des Vertrags. Fehlt die bestaetigte Nummer
+        # am Ende, bricht der Auftrag vor jedem eBay-Entwurf ab.
         wo_liegt = {str(lokal): fern for lokal, fern in zip(fotos, speicherpfade)}
-        gruppen = (gruppieren.aufteilen(fotos) if CLOUD_GRUPPIEREN else [list(fotos)])
+        gruppen = _app_gruppen(page, fotos)
         if len(gruppen) > 1:
             for weiteres_teil in gruppen[1:]:
                 pfade = [wo_liegt[str(p)] for p in weiteres_teil if str(p) in wo_liegt]

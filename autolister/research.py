@@ -176,3 +176,22 @@ def pruefe_kandidaten(page, kandidaten) -> Dict:
                     "geprueft": True})
     return {"kandidat": kandidaten[0] if kandidaten else None,
             "query": "", "angebote": [], "verkaufte": [], "geprueft": False}
+
+
+def bestaetige_kandidaten(page, kandidaten):
+    """Eine OCR-Lesart nur dann als Gruppengrenze zulassen, wenn eBay sie kennt.
+
+    Anders als `pruefe_kandidaten` wird hier keine Preisrecherche und keine
+    Suche nach verkauften Artikeln gestartet. Die Gruppierung braucht nur die
+    Ja/Nein-Antwort, ob die Nummer exakt in mindestens einem Titel vorkommt.
+    """
+    gesucht = set()
+    for kandidat in kandidaten[:config.KANDIDATEN_PRUEFEN]:
+        for query in _query_variants(kandidat.formatiert, kandidat.nummer):
+            if query in gesucht or len(gesucht) >= config.SUCHEN_MAXIMAL:
+                continue
+            gesucht.add(query)
+            items = _suche(page, query)
+            if any(_nummer_im_titel(kandidat.nummer, i["titel"]) for i in items):
+                return kandidat
+    return None

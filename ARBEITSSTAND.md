@@ -8,7 +8,30 @@ Hier steht deshalb, **wo die Arbeit gerade steht und was als Nächstes ansteht**
 der Stand geändert hat — erledigte Punkte streichen, neue Erkenntnisse eintragen.
 Dauerhaftes Wissen über das Projekt gehört dagegen nach `CLAUDE.md`, nicht hierher.
 
-Letzte Aktualisierung: 2026-08-09 (eBay-Formularumbau nachgezogen)
+Letzte Aktualisierung: 2026-08-15 (sichere App-Gruppierung)
+
+---
+
+## Sichere Gruppierung fuer TeilePilot (15.08.2026)
+
+Der Nutzer fotografiert kuenftig jedes Produkt zusammenhaengend und die
+Teilenummer immer als letztes Bild. Ein gemeinsamer Upload wird daran
+automatisch getrennt.
+
+- `gruppieren.fuer_app()` liest jedes Foto einzeln.
+- Eine OCR-Lesart wird ueber `research.bestaetige_kandidaten()` gegen eBay
+  geprueft. Nur wenn die Nummer exakt in einem Angebotstitel vorkommt, darf
+  das Bild die aktuelle Gruppe schliessen.
+- Fehllesungen wie `4ZC532825GS` oder `5C0010090` mit null passenden Titeln
+  werden ignoriert und erzeugen kein zusaetzliches Teil.
+- Fehlt jede bestaetigte Nummer oder liegen Fotos hinter dem letzten
+  bestaetigten Nummernbild, stoppt der Auftrag vor dem Entwurf. Es wird nicht
+  geraten.
+- 7 neue Tests decken Gruppengrenzen, falsche Aufklebernummern, fehlende
+  Schlussnummer und die eBay-Anbindung ab; insgesamt 21 Tests bestanden.
+
+Noch zu tun: TeilePilot-Oberflaeche wieder auf einen gemeinsamen Foto-Upload
+umstellen, Worker aktualisieren und an einem frischen echten Stapel pruefen.
 
 ---
 
