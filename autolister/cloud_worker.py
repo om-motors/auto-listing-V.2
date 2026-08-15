@@ -31,19 +31,29 @@ from . import cloud, config, gruppieren, notify, pipeline
 
 log = logging.getLogger("autolister")
 
-# Aufträge aus der App WERDEN gruppiert. Das ist der Normalfall: Der Nutzer
-# lädt einen ganzen Rundgang auf einmal hoch — „drei Bilder für eine
-# Abdeckung, vier für ein Steuergerät" — und erwartet zu Recht, dass das
-# Programm die Teile selbst trennt.
+# Aufträge aus der App werden NICHT gruppiert: ein Auftrag ist ein Teil.
 #
-# ⚠️ Am 15.08.2026 war das kurzzeitig abgeschaltet, weil die Gruppierung
-# falsch trennte. Der Fehler lag nicht im Gruppieren, sondern in der Regel
-# dahinter (siehe `gruppieren.nach_teilenummer`): Sie nahm an, die Teilenummer
-# stehe am ANFANG einer Gruppe, tatsächlich wird sie ZULETZT fotografiert.
-# Damit war jede Gruppe um ein Teil verschoben. Abschalten war die falsche
-# Antwort — der Nutzer dazu deutlich: „das Programm soll es definitiv selber
-# zuordnen, sonst ist das ein massiver Rückschritt."
-CLOUD_GRUPPIEREN = os.environ.get("AUTOLISTER_CLOUD_GRUPPIEREN", "1") != "0"
+# Der Nutzer wählt in TeilePilot die Fotos eines Teils aus und reiht sie als
+# eigenen Auftrag ein („+ Teil hinzufügen"). Diese Auswahl ist WISSEN; die
+# Gruppierung über Teilenummern ist eine SCHÄTZUNG.
+#
+# ⚠️ Die Geschichte dazu, damit sie niemand noch einmal durchläuft:
+#
+#   14.08.  Gruppierung an. 15 Fotos von 5 Teilen wurden zu 7 Aufträgen,
+#           keine Gruppe richtig. Abgeschaltet.
+#   15.08.  Nutzer widerspricht — das Programm soll es selbst können.
+#           Regelfehler gefunden (die Nummer schliesst eine Gruppe ab, sie
+#           eröffnet sie nicht) und behoben, Gruppierung wieder an.
+#   15.08.  Nutzer testet erneut: „du kriegst es einfach nicht hin. mach es
+#           einfach wieder so wie vorher, dass ich die Teile einzeln
+#           hochladen muss." Also wieder aus.
+#
+# Die reparierte Regel in `gruppieren.nach_teilenummer()` BLEIBT und ist
+# nachweislich besser als die alte — sie greift weiterhin für den
+# Ordner-Watcher (`Eingang/`). Sie reicht im Betrieb nur nicht aus. Wer sie
+# erneut für die App einschalten will: `AUTOLISTER_CLOUD_GRUPPIEREN=1`, und
+# vorher die offenen Punkte in UEBERGABE.md lesen.
+CLOUD_GRUPPIEREN = os.environ.get("AUTOLISTER_CLOUD_GRUPPIEREN", "") == "1"
 
 
 def _arbeitsordner(auftrag: Dict) -> Path:
