@@ -45,6 +45,16 @@ class GruppierungApp(unittest.TestCase):
         self.assertEqual(gruppen, [self.fotos[:3], self.fotos[3:]])
 
     @patch("autolister.gruppieren.ocr.lies_fotos_einzeln")
+    def test_gleiche_nummer_auf_uebersicht_und_nahaufnahme_schliesst_nur_einmal(
+            self, lesen):
+        lesen.return_value = ocr_funde(
+            None, "8K0857551", "8K0857551", None, None, None, "8K0907801N")
+
+        gruppen = gruppieren.fuer_app(self.fotos, self.bestaetige)
+
+        self.assertEqual(gruppen, [self.fotos[:3], self.fotos[3:]])
+
+    @patch("autolister.gruppieren.ocr.lies_fotos_einzeln")
     def test_fotos_hinter_letzter_nummer_stoppen_den_auftrag(self, lesen):
         lesen.return_value = ocr_funde(
             None, None, "8K0857551", None, None, None, None)
@@ -85,6 +95,26 @@ class EbayBestaetigung(unittest.TestCase):
     def test_beliebige_ebay_treffer_bestaetigen_keine_nummer(self, suche):
         suche.return_value = [
             {"titel": "Audi Sonnenblende ohne Teilenummer", "preis": 30.0},
+        ]
+
+        gefunden = research.bestaetige_kandidaten(object(), [self.kandidat])
+
+        self.assertIsNone(gefunden)
+
+    @patch("autolister.research._suche")
+    def test_anderer_suffix_bestaetigt_die_nummer_nicht(self, suche):
+        suche.return_value = [
+            {"titel": "Audi Sonnenblende 8K0857551A", "preis": 30.0},
+        ]
+
+        gefunden = research.bestaetige_kandidaten(object(), [self.kandidat])
+
+        self.assertIsNone(gefunden)
+
+    @patch("autolister.research._suche")
+    def test_nummer_innerhalb_einer_laengeren_nummer_gilt_nicht(self, suche):
+        suche.return_value = [
+            {"titel": "Audi Teil X8K08575519", "preis": 30.0},
         ]
 
         gefunden = research.bestaetige_kandidaten(object(), [self.kandidat])

@@ -63,7 +63,7 @@ def fuer_app(fotos: List[Path], kandidat_bestaetigen) -> List[List[Path]]:
         raise GruppierungUnsicher(
             "Die Nummernbilder konnten nicht gelesen werden: %s" % fehler) from fehler
 
-    abschluesse: List[int] = []
+    anker = []
     cache = {}
     for i, texte in enumerate(je_foto):
         kandidaten = partnumber.finde_kandidaten(texte) if texte else []
@@ -72,8 +72,19 @@ def fuer_app(fotos: List[Path], kandidat_bestaetigen) -> List[List[Path]]:
         schluessel = tuple(k.nummer for k in kandidaten)
         if schluessel not in cache:
             cache[schluessel] = kandidat_bestaetigen(kandidaten)
-        if cache[schluessel]:
-            abschluesse.append(i)
+        bestaetigt = cache[schluessel]
+        if bestaetigt:
+            nummer = bestaetigt.nummer
+            # Dieselbe Teilenummer kann schon auf einem Uebersichtsbild und
+            # danach nochmals auf der gewollten Nahaufnahme lesbar sein. Der
+            # letzte Fund ist der Abschluss; daraus duerfen nie zwei Produkte
+            # und damit zwei Entwuerfe entstehen.
+            if anker and anker[-1][1] == nummer:
+                anker[-1] = (i, nummer)
+            else:
+                anker.append((i, nummer))
+
+    abschluesse = [i for i, _nummer in anker]
 
     if not abschluesse:
         raise GruppierungUnsicher(

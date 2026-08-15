@@ -110,6 +110,21 @@ def _nummer_im_titel(nummer: str, titel: str) -> bool:
     return bool(ohne_suffix and ohne_suffix.group(1) in sauber)
 
 
+def _nummer_exakt_im_titel(nummer: str, titel: str) -> bool:
+    """Exakte Nummer fuer sicherheitskritische Gruppengrenzen pruefen.
+
+    Leer- und Trennzeichen innerhalb der Nummer sind erlaubt. Direkt davor
+    oder danach darf jedoch kein Buchstabe und keine Ziffer stehen; vor allem
+    wird hier niemals ein Nachsatzbuchstabe weggelassen.
+    """
+    zeichen = re.sub(r"[^A-Z0-9]", "", nummer.upper())
+    if not zeichen:
+        return False
+    muster = (r"(?<![A-Z0-9])" + r"[^A-Z0-9]*".join(
+        re.escape(z) for z in zeichen) + r"(?![A-Z0-9])")
+    return bool(re.search(muster, titel.upper()))
+
+
 def _mit_verkauften_ergaenzen(page, query: str, ergebnis: Dict) -> Dict:
     """Tatsächlich erzielte Verkaufspreise nachladen.
 
@@ -192,6 +207,7 @@ def bestaetige_kandidaten(page, kandidaten):
                 continue
             gesucht.add(query)
             items = _suche(page, query)
-            if any(_nummer_im_titel(kandidat.nummer, i["titel"]) for i in items):
+            if any(_nummer_exakt_im_titel(kandidat.nummer, i["titel"])
+                   for i in items):
                 return kandidat
     return None
