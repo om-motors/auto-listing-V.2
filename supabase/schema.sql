@@ -56,7 +56,7 @@ create or replace function public.auftrag_atomar_aufteilen(
   p_kinder jsonb
 ) returns void
 language plpgsql
-security definer
+security invoker
 set search_path = public
 as $$
 begin
@@ -80,6 +80,7 @@ revoke all on function public.auftrag_atomar_aufteilen(uuid, text[], jsonb)
   from public, anon, authenticated;
 grant execute on function public.auftrag_atomar_aufteilen(uuid, text[], jsonb)
   to service_role;
+grant select, insert, update on table public.auftraege to service_role;
 
 alter table public.auftraege enable row level security;
 
