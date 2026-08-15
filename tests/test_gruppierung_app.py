@@ -8,7 +8,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from autolister import cloud_worker, gruppieren, partnumber, research
+from autolister import cloud, cloud_worker, gruppieren, partnumber, research
 
 
 def ocr_funde(*nummern):
@@ -135,6 +135,22 @@ class CloudWorkerGruppierung(unittest.TestCase):
         gruppen = cloud_worker._app_gruppen(object(), fotos)
 
         self.assertEqual(gruppen, [fotos])
+
+
+class CloudAufteilung(unittest.TestCase):
+    @patch("autolister.cloud._anfrage")
+    def test_alle_gruppen_gehen_in_einem_rpc_aufruf_an_supabase(self, anfrage):
+        auftrag_id = "12345678-1234-5678-1234-567812345678"
+        gruppen = [["a/1.jpg", "a/2.jpg"], ["a/3.jpg"], ["a/4.jpg"]]
+
+        cloud.auftrag_atomar_aufteilen(auftrag_id, gruppen)
+
+        self.assertEqual(anfrage.call_count, 1)
+        pfad, = anfrage.call_args.args
+        self.assertEqual(pfad, "/rest/v1/rpc/auftrag_atomar_aufteilen")
+        daten = __import__("json").loads(anfrage.call_args.kwargs["daten"])
+        self.assertEqual(daten["p_eltern_fotos"], gruppen[0])
+        self.assertEqual([k["fotos"] for k in daten["p_kinder"]], gruppen[1:])
 
 if __name__ == "__main__":
     unittest.main()

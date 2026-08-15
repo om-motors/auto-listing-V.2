@@ -16,6 +16,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -114,7 +115,31 @@ def auftrag_anlegen(fotos: List[str], bezeichnung: Optional[str] = None) -> None
              daten=json.dumps({"fotos": fotos,
                                "bezeichnung": bezeichnung}).encode("utf-8"),
              kopfzeilen={"Content-Type": "application/json",
-                         "Prefer": "return=minimal"})
+                             "Prefer": "return=minimal"})
+
+
+def auftrag_atomar_aufteilen(auftrag_id: str, gruppen: List[List[str]]) -> None:
+    """Elternauftrag und alle Kindauftraege in einer DB-Transaktion trennen.
+
+    Die Kind-IDs sind aus Eltern-ID und Gruppennummer ableitbar. Geht nur die
+    Netzwerkantwort verloren, kann derselbe Aufruf daher gefahrlos wiederholt
+    werden, ohne doppelte Auftraege zu erzeugen.
+    """
+    if len(gruppen) < 2:
+        return
+    namespace = uuid.UUID(str(auftrag_id))
+    kinder = [
+        {"id": str(uuid.uuid5(namespace, "autolisting-gruppe-%d" % i)),
+         "fotos": fotos}
+        for i, fotos in enumerate(gruppen[1:], start=1)
+    ]
+    _anfrage(
+        "/rest/v1/rpc/auftrag_atomar_aufteilen", methode="POST",
+        daten=json.dumps({"p_auftrag_id": str(auftrag_id),
+                          "p_eltern_fotos": gruppen[0],
+                          "p_kinder": kinder}).encode("utf-8"),
+        kopfzeilen={"Content-Type": "application/json",
+                    "Prefer": "return=minimal"})
 
 
 def haengende_freigeben() -> int:

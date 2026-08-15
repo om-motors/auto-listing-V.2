@@ -46,6 +46,41 @@ create table if not exists public.auftraege (
 create index if not exists auftraege_status_idx
   on public.auftraege (status, erstellt_am);
 
+-- Einen Mehrteile-Upload ohne Zwischenzustand trennen. Das UPDATE des
+-- Elternauftrags und alle INSERTs laufen als ein Funktionsaufruf in derselben
+-- Postgres-Transaktion. Deterministische Kind-IDs machen Wiederholungen nach
+-- einem verlorenen Netzwerk-Reply idempotent.
+create or replace function public.auftrag_atomar_aufteilen(
+  p_auftrag_id uuid,
+  p_eltern_fotos text[],
+  p_kinder jsonb
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.auftraege
+     set fotos = p_eltern_fotos
+   where id = p_auftrag_id and status = 'laeuft';
+  if not found then
+    raise exception 'Auftrag % ist nicht im Status laeuft', p_auftrag_id;
+  end if;
+
+  insert into public.auftraege (id, fotos, bezeichnung)
+  select (kind->>'id')::uuid,
+         array(select jsonb_array_elements_text(kind->'fotos')),
+         null
+    from jsonb_array_elements(p_kinder) as kind
+  on conflict (id) do update set fotos = excluded.fotos;
+end;
+$$;
+
+revoke all on function public.auftrag_atomar_aufteilen(uuid, text[], jsonb)
+  from public, anon, authenticated;
+grant execute on function public.auftrag_atomar_aufteilen(uuid, text[], jsonb)
+  to service_role;
+
 alter table public.auftraege enable row level security;
 
 -- Angemeldete Nutzer (also du) dürfen alles sehen und anlegen. Das Werkzeug

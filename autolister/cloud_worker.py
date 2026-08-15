@@ -76,33 +76,18 @@ def auftrag_verarbeiten(auftrag: Dict, dry_run: bool = False, page=None) -> None
         wo_liegt = {str(lokal): fern for lokal, fern in zip(fotos, speicherpfade)}
         gruppen = _app_gruppen(page, fotos)
         if len(gruppen) > 1:
-            for weiteres_teil in gruppen[1:]:
-                pfade = [wo_liegt[str(p)] for p in weiteres_teil if str(p) in wo_liegt]
-                if pfade:
-                    # Eine getippte Teilenummer gilt nur für EIN Teil — sie
-                    # den übrigen mitzugeben wäre schlicht falsch.
-                    cloud.auftrag_anlegen(pfade, bezeichnung=None)
+            ferne_gruppen = [
+                [wo_liegt[str(p)] for p in gruppe if str(p) in wo_liegt]
+                for gruppe in gruppen
+            ]
+            if any(not gruppe for gruppe in ferne_gruppen):
+                raise gruppieren.GruppierungUnsicher(
+                    "Die Fotogruppen konnten nicht vollständig zugeordnet werden.")
+            cloud.auftrag_atomar_aufteilen(auftrag["id"], ferne_gruppen)
             log.info("[%s] %d Teile erkannt — %d weitere(r) Auftrag angelegt",
                      kennung, len(gruppen), len(gruppen) - 1)
             fotos = gruppen[0]
-            speicherpfade = [wo_liegt[str(p)] for p in fotos if str(p) in wo_liegt]
-
-            # ⚠️ Auch in der DATENBANK auf die eigene Gruppe eindampfen.
-            #
-            # Vorher wurden nur die lokalen Variablen verkleinert; die Zeile in
-            # `auftraege` behielt alle Fotos des Uploads. Der fertige Auftrag
-            # führte damit die Bilder ALLER Teile, und in TeilePilot sah es aus,
-            # als wären die Fotos falsch einsortiert.
-            #
-            # Am 2026-08-14 zweimal gemessen: Ein Upload mit 15 Fotos ergab
-            # einen fertigen "Stoßstangenhalter" mit allen 15 Bildern und
-            # daneben fünf Aufträge mit den Teilmengen. Der Nutzer sah beim
-            # Steuergerät ein einzelnes Bild, während seine übrigen beim
-            # Stoßstangenhalter lagen.
-            try:
-                cloud.auftrag_fotos_setzen(auftrag["id"], speicherpfade)
-            except Exception as fehler:  # noqa: BLE001 — darf den Lauf nicht kippen
-                log.warning("[%s] Fotoliste nicht eingegrenzt: %s", kennung, fehler)
+            speicherpfade = ferne_gruppen[0]
 
         # Eine vom Handy eingetippte Teilenummer wird wie ein Ordnername
         # behandelt — `partnumber.aus_vorgabe()` erkennt selbst, ob das
